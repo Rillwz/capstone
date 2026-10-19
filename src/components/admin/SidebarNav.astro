@@ -1,0 +1,38 @@
+---
+// The dashboard menu list, defined once. The layout docks it in the lg+ sidebar, and
+// the floating drawer (SidebarMenu) renders the same markup below lg.
+import type { AstroComponent } from "@lucide/astro";
+
+interface Props {
+  items: Array<{ href: string; label: string; icon: AstroComponent; active: boolean }>;
+  ariaLabel?: string;
+  class?: string;
+}
+
+const { items, ariaLabel = "Navigasi dasbor", class: className } = Astro.props;
+---
+
+<nav class:list={[className]} aria-label={ariaLabel}>
+  <p class="px-3 pb-2 text-xs font-medium tracking-wider text-slate-400 uppercase">Menu</p>
+  <ul class="space-y-1">
+    {
+      items.map(({ href, label, icon: Icon, active }) => (
+        <li>
+          <a
+            href={href}
+            aria-current={active ? "page" : undefined}
+            class:list={[
+              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+              active
+                ? "bg-brand-50 text-brand-700"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+            ]}
+          >
+            <Icon class="size-4 shrink-0" />
+            <span class="flex-1">{label}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>

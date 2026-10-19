@@ -1,0 +1,509 @@
+---
+// Kategori detail — one work unit and its "Jenis Aktivitas Unit Kerja" rows.
+//
+// Input flow: "+ Tambah aktivitas" opens a modal form. Saving redirects back with
+// ?saved=1, so a refresh can never resubmit; "Simpan & tambah lagi" redirects with
+// &add=1 and reopens the modal on a clean, empty form for the next entry.
+// Deleting is its own modal ("Hapus aktivitas") where rows are ticked and removed in one
+// go — no per-row button in the table.
+import { ArrowLeft, Check, ChevronRight, ClipboardList, Plus, Trash, X } from "@lucide/astro";
+import Button from "../../../components/ui/Button.astro";
+import ChoiceGroup from "../../../components/ui/ChoiceGroup.astro";
+import Input from "../../../components/ui/Input.astro";
+import DashboardLayout from "../../../layouts/DashboardLayout.astro";
+import { CLASSIFICATIONS, PERIODES, parseActivity } from "../../../lib/activities";
+import { requireAdmin } from "../../../lib/auth";
+import { findCategory } from "../../../lib/categories";
+import { createActivity, deleteActivity, listActivities, updateActivity } from "../../../lib/db";
+import { formatDay } from "../../../lib/format";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const category = findCategory(Astro.params.id);
+if (!category) return new Response("Kategori tidak ditemukan", { status: 404 });
+const { id: categoryId, icon: Icon, label } = category;
+
+// The form starts empty; the month and year of the day field come from today (server).
+const flagValues = () => CLASSIFICATIONS.map(({ value }) => value);
+
+// What the modal shows: a fresh form with the unit's defaults, whatever was typed when
+// validation failed, or the row being edited (?edit=<id>).
+let draft = {
+  name: "",
+  day: "",
+  classifications: ["utama"] as string[],
+  periode: "Harian",
+  frequency: "1",
+  minutes: "60",
+  sdm: "1",
+};
+let error: string | undefined;
+let dialogOpen = Astro.url.searchParams.has("add");
+let editId: number | undefined;
+
+const activities = listActivities(categoryId);
+const edited = activities.find((activity) => activity.id === Number(Astro.url.searchParams.get("edit") ?? 0));
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+
+  if (form.get("action") === "delete") {
+    const ids = form.getAll("ids").map(Number).filter(Number.isInteger);
+    for (const id of ids) deleteActivity(id, categoryId);
+    return Astro.redirect(`/dashboard/categories/${categoryId}${ids.length ? `?deleted=${ids.length}` : ""}`);
+  }
+
+  // A submitted id turns this into an edit. The row keeps its own month, so fixing the
+  // day of an old row cannot drag its date into the current month.
+  const target = activities.find((activity) => activity.id === Number(form.get("id")));
+  const parsed = parseActivity(form, target?.date.slice(0, 7) || undefined);
+
+  if ("error" in parsed) {
+    const typed = (name: string) => String(form.get(name) ?? "");
+    error = parsed.error;
+    dialogOpen = true;
+    editId = target?.id;
+    draft = {
+      name: typed("name"),
+      day: typed("day"),
+      classifications: flagValues().filter((flag) => form.has(flag)),
+      periode: typed("periode"),
+      frequency: typed("frequency"),
+      minutes: typed("minutes"),
+      sdm: typed("sdm"),
+    };
+  } else if (target) {
+    updateActivity(target.id, categoryId, parsed.value);
+    return Astro.redirect(`/dashboard/categories/${categoryId}?updated=1`);
+  } else {
+    createActivity(categoryId, parsed.value);
+    const again = form.get("next") === "again" ? "&add=1" : "";
+    return Astro.redirect(`/dashboard/categories/${categoryId}?saved=1${again}`);
+  }
+} else if (edited) {
+  editId = edited.id;
+  dialogOpen = true;
+  draft = {
+    name: edited.name,
+    day: edited.date ? String(Number(edited.date.slice(8, 10))) : "",
+    classifications: flagValues().filter((flag) => edited[flag]),
+    periode: edited.periode,
+    frequency: String(edited.frequency),
+    minutes: String(edited.minutes),
+    sdm: String(edited.sdm),
+  };
+}
+
+const justSaved = Astro.url.searchParams.has("saved");
+const justUpdated = Astro.url.searchParams.has("updated");
+const deletedCount = Number(Astro.url.searchParams.get("deleted") ?? 0);
+
+// Shown before the modal's JS takes over: the same formula the server applies on save.
+const volume = (frequency: string, minutes: string, sdm: string) => {
+  const total = Number(frequency) * Number(minutes) * Number(sdm);
+  return frequency && minutes && sdm && Number.isFinite(total) ? total.toLocaleString("id-ID") : "–";
+};
+---
+
+<DashboardLayout title={label} user={session.user}>
+  <a
+    href="/dashboard/categories"
+    class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900"
+  >
+    <ArrowLeft class="size-4" />
+    Semua kategori
+  </a>
+
+  <div class="mt-4 flex items-center gap-3">
+    <span class="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">
+      <Icon class="size-5" />
+    </span>
+    <div>
+      <h1 class="text-xl font-semibold tracking-wide text-slate-900 uppercase">{label}</h1>
+      <p class="mt-0.5 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
+    </div>
+  </div>
+
+  <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+    <h2 class="text-sm font-semibold text-slate-900">Jenis Aktivitas Unit Kerja</h2>
+    <div class="flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="danger" type="button" data-delete-open disabled={activities.length === 0}>
+        <Trash class="size-4" />Hapus
+      </Button>
+      <Button size="sm" variant="outline" type="button" data-manage-open>
+        <ClipboardList class="size-4" />Edit
+      </Button>
+      <Button size="sm" type="button" data-activity-open><Plus class="size-4" />Tambah</Button>
+    </div>
+  </div>
+
+  {
+    justSaved && (
+      <p data-notice class="notice mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+        Aktivitas tersimpan.
+      </p>
+    )
+  }
+
+  {
+    justUpdated && (
+      <p data-notice class="notice mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+        Aktivitas diperbarui.
+      </p>
+    )
+  }
+
+  {
+    deletedCount > 0 && (
+      <p data-notice class="notice mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700" role="status">
+        {deletedCount} aktivitas dihapus.
+      </p>
+    )
+  }
+
+  <div class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <table class="w-full min-w-[56rem] text-left text-xs">
+      <thead class="border-b border-slate-200 text-[11px] tracking-wide text-slate-500 uppercase">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Jenis Aktivitas</th>
+          <th class="px-4 py-2.5 font-medium">Tanggal</th>
+          <th class="px-3 py-2.5 text-center font-medium">Utama</th>
+          <th class="px-3 py-2.5 text-center font-medium">Periodik</th>
+          <th class="px-3 py-2.5 text-center font-medium">Bukan Tupoksi</th>
+          <th class="px-4 py-2.5 font-medium">Periode</th>
+          <th class="px-4 py-2.5 text-right font-medium">Frekuensi/ Tahun</th>
+          <th class="px-4 py-2.5 text-right font-medium">Durasi (Menit)</th>
+          <th class="px-4 py-2.5 text-right font-medium">Jumlah SDM</th>
+          <th class="px-4 py-2.5 text-right font-medium">Volume Kerja</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {
+          activities.length === 0 ? (
+            <tr>
+              <td colspan="9" class="px-4 py-8 text-center text-slate-500">
+                Belum ada jenis aktivitas untuk unit ini.
+              </td>
+            </tr>
+          ) : (
+            activities.map((activity) => (
+              <tr class="align-top">
+                <td class="px-4 py-2.5 font-medium text-slate-900">{activity.name}</td>
+                <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{formatDay(activity.date)}</td>
+                {CLASSIFICATIONS.map(({ value }) => (
+                  <td class="px-3 py-2.5 text-center">
+                    {activity[value] ? (
+                      <Check class="mx-auto size-3.5 text-brand-600" />
+                    ) : (
+                      <span class="text-slate-300">–</span>
+                    )}
+                  </td>
+                ))}
+                <td class="px-4 py-2.5 text-slate-600">{activity.periode}</td>
+                <td class="px-4 py-2.5 text-right text-slate-600 tabular-nums">{activity.frequency}</td>
+                <td class="px-4 py-2.5 text-right text-slate-600 tabular-nums">{activity.minutes}</td>
+                <td class="px-4 py-2.5 text-right text-slate-600 tabular-nums">{activity.sdm}</td>
+                <td class="px-4 py-2.5 text-right text-slate-600 tabular-nums">
+                  {activity.volume.toLocaleString("id-ID")}
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <dialog
+    id="activity-dialog"
+    data-open={dialogOpen ? "" : undefined}
+    class="app-dialog w-[calc(100vw-2rem)] max-w-2xl"
+    aria-labelledby="activity-dialog-title"
+  >
+    <form method="POST" class="p-5 sm:p-6">
+      <input type="hidden" name="action" value={editId ? "update" : "create"} />
+      {editId && <input type="hidden" name="id" value={editId} />}
+
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h2 id="activity-dialog-title" class="text-base font-semibold text-slate-900">
+            {editId ? "Ubah aktivitas" : "Tambah aktivitas"}
+          </h2>
+          <p class="mt-0.5 text-xs text-slate-500">Unit {label}</p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <div class="mt-5 grid gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <Input
+            label="Jenis aktivitas"
+            name="name"
+            value={draft.name}
+            placeholder="mis. Rekonsiliasi laporan bulanan"
+            required
+          />
+        </div>
+        <Input label="Setiap Tanggal" name="day" type="text" inputmode="numeric" value={draft.day} />
+        <Input label="Durasi (menit)" name="minutes" type="number" value={draft.minutes} required />
+        <div class="sm:col-span-2">
+          <ChoiceGroup
+            label="Klasifikasi"
+            multiple
+            options={CLASSIFICATIONS}
+            selected={draft.classifications}
+            hint="Bisa pilih lebih dari satu."
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <ChoiceGroup
+            label="Periode"
+            name="periode"
+            options={PERIODES.map((periode) => ({ value: periode, label: periode }))}
+            value={draft.periode}
+          />
+        </div>
+        <div class="grid gap-4 sm:col-span-2 sm:grid-cols-3">
+          <Input label="Frekuensi/ Tahun" name="frequency" type="number" value={draft.frequency} required />
+          <Input label="Jumlah SDM" name="sdm" type="number" value={draft.sdm} required />
+          <div>
+            <span class="mb-1.5 block text-sm font-medium text-slate-700">Volume Kerja</span>
+            <p
+              data-volume
+              class="flex h-11 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-700 tabular-nums"
+            >
+              {volume(draft.frequency, draft.minutes, draft.sdm)}
+            </p>
+            <p class="mt-1.5 text-xs text-slate-500">frekuensi × durasi × SDM.</p>
+          </div>
+        </div>
+      </div>
+
+      {error && <p class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
+
+      <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        {!editId && (
+          <Button variant="outline" type="submit" name="next" value="again">
+            Simpan &amp; Buat
+          </Button>
+        )}
+        <Button type="submit">Simpan</Button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog
+    id="delete-dialog"
+    class="app-dialog w-[calc(100vw-2rem)] max-w-lg"
+    aria-labelledby="delete-dialog-title"
+  >
+    <form method="POST">
+      <input type="hidden" name="action" value="delete" />
+
+      <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+        <div>
+          <h2 id="delete-dialog-title" class="text-base font-semibold text-slate-900">Hapus aktivitas</h2>
+          <p class="mt-0.5 text-xs text-slate-500">Unit {label} — pilih aktivitas yang ingin dihapus.</p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <div class="mt-4 max-h-[50vh] overflow-y-auto border-y border-slate-200">
+        {
+          activities.length === 0 ? (
+            <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada aktivitas untuk dihapus.</p>
+          ) : (
+            <ul class="divide-y divide-slate-100">
+              {activities.map((activity) => (
+                <li>
+                  <label class="flex cursor-pointer items-start gap-3 px-5 py-3 transition-colors hover:bg-slate-50 has-[:focus-visible]:bg-slate-50 sm:px-6">
+                    <input
+                      type="checkbox"
+                      name="ids"
+                      value={activity.id}
+                      class="mt-0.5 size-4 shrink-0 accent-brand-600"
+                    />
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-sm font-medium text-slate-900">{activity.name}</span>
+                      <span class="mt-0.5 block text-xs text-slate-500">
+                        {formatDay(activity.date)} · {activity.periode}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </div>
+
+      <div class="flex flex-col-reverse gap-2 p-5 sm:flex-row sm:justify-end sm:px-6">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={activities.length === 0}>
+          <Trash class="size-4" />Hapus terpilih<span data-delete-count></span>
+        </Button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="manage-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-2xl" aria-labelledby="manage-dialog-title">
+    <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+      <div>
+        <h2 id="manage-dialog-title" class="text-base font-semibold text-slate-900">Aktivitas unit {label}</h2>
+        <p class="mt-0.5 text-xs text-slate-500">Klik satu aktivitas untuk mengubahnya.</p>
+      </div>
+      <button
+        type="button"
+        data-dialog-close
+        aria-label="Tutup"
+        class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+
+    <div class="mt-4 max-h-[60vh] overflow-y-auto border-y border-slate-200">
+      {
+        activities.length === 0 ? (
+          <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada aktivitas untuk unit ini.</p>
+        ) : (
+          <ul class="divide-y divide-slate-100">
+            {activities.map((activity) => (
+              <li>
+                <a
+                  href={`/dashboard/categories/${categoryId}?edit=${activity.id}`}
+                  class="flex items-start gap-3 px-5 py-3 transition-colors hover:bg-slate-50 focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-brand-600 sm:px-6"
+                >
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium text-slate-900">{activity.name}</span>
+                    <span class="mt-0.5 block text-xs text-slate-500">
+                      {formatDay(activity.date)} · {activity.periode} · {activity.frequency}×/tahun ·{" "}
+                      {activity.minutes} menit · {activity.sdm} SDM · volume {activity.volume.toLocaleString("id-ID")}
+                    </span>
+                  </span>
+                  <ChevronRight class="mt-0.5 size-4 shrink-0 text-slate-400" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </div>
+
+    <div class="flex justify-end p-5 sm:px-6">
+      <Button variant="outline" type="button" data-dialog-close>Tutup</Button>
+    </div>
+  </dialog>
+</DashboardLayout>
+
+<script>
+  const wireDialog = (
+    dialogId: string,
+    openSelector: string,
+    hooks: { onOpen?: (dialog: HTMLDialogElement) => void; onClose?: (dialog: HTMLDialogElement) => void } = {},
+  ) => {
+    const dialog = document.getElementById(dialogId) as HTMLDialogElement | null;
+    if (!dialog) return;
+
+    const open = () => {
+      dialog.showModal();
+      hooks.onOpen?.(dialog);
+    };
+
+    document.querySelector(openSelector)?.addEventListener("click", open);
+    dialog
+      .querySelectorAll("[data-dialog-close]")
+      .forEach((button) => button.addEventListener("click", () => dialog.close()));
+
+    dialog.addEventListener("close", () => {
+      // Drop ?add=1 on close, so a refresh doesn't reopen the add modal.
+      if (location.search) history.replaceState(null, "", location.pathname);
+      hooks.onClose?.(dialog);
+    });
+
+    if (dialog.dataset.open !== undefined) open();
+  };
+
+  wireDialog("activity-dialog", "[data-activity-open]", {
+    onOpen: (dialog) => {
+      const nameInput = dialog.querySelector<HTMLInputElement>("#field-name");
+      nameInput?.focus();
+      nameInput?.select();
+    },
+  });
+
+  /** Keeps "Hapus terpilih (n)" in step with what is ticked. */
+  const syncDeleteButton = (dialog: HTMLDialogElement) => {
+    const submit = dialog.querySelector<HTMLButtonElement>("[data-delete-submit]");
+    const count = dialog.querySelector<HTMLElement>("[data-delete-count]");
+    const selected = [...dialog.querySelectorAll<HTMLInputElement>('input[name="ids"]')].filter(
+      (box) => box.checked,
+    ).length;
+
+    if (submit) submit.disabled = selected === 0;
+    if (count) count.textContent = selected ? ` (${selected})` : "";
+  };
+
+  const deleteDialog = document.getElementById("delete-dialog") as HTMLDialogElement | null;
+  deleteDialog
+    ?.querySelectorAll<HTMLInputElement>('input[name="ids"]')
+    .forEach((box) => box.addEventListener("change", () => syncDeleteButton(deleteDialog)));
+
+  wireDialog("delete-dialog", "[data-delete-open]", {
+    onOpen: syncDeleteButton,
+    // Ticks must not survive closing the modal, or the next visit would delete them.
+    onClose: (dialog) => {
+      dialog.querySelector("form")?.reset();
+      syncDeleteButton(dialog);
+    },
+  });
+
+  wireDialog("manage-dialog", "[data-manage-open]");
+
+  /** Mirrors the server rule: Volume Kerja = frekuensi/tahun × durasi × jumlah SDM. */
+  const syncVolume = () => {
+    const dialog = document.getElementById("activity-dialog") as HTMLDialogElement | null;
+    const out = dialog?.querySelector<HTMLElement>("[data-volume]");
+    if (!dialog || !out) return;
+
+    const raw = (name: string) => dialog.querySelector<HTMLInputElement>(`#field-${name}`)?.value.trim() ?? "";
+    const [frequency, minutes, sdm] = ["frequency", "minutes", "sdm"].map(raw);
+    const total = Number(frequency) * Number(minutes) * Number(sdm);
+    out.textContent = frequency && minutes && sdm && Number.isFinite(total) ? total.toLocaleString("id-ID") : "–";
+  };
+
+  document.getElementById("activity-dialog")?.addEventListener("input", syncVolume);
+  syncVolume();
+
+  // Flash notices ("Aktivitas tersimpan.") leave on their own: 4s to read, then the
+  // fade-out. The params go with them, so a later refresh cannot show them again.
+  document.querySelectorAll<HTMLElement>("[data-notice]").forEach((notice) => {
+    setTimeout(() => {
+      notice.classList.add("is-leaving");
+      setTimeout(() => {
+        notice.remove();
+        const url = new URL(location.href);
+        url.searchParams.delete("saved");
+        url.searchParams.delete("updated");
+        url.searchParams.delete("deleted");
+        history.replaceState(null, "", url.pathname + url.search);
+      }, 400);
+    }, 4000);
+  });
+</script>

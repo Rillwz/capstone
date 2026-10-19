@@ -1,0 +1,70 @@
+---
+import Button from "./ui/Button.astro";
+import Input from "./ui/Input.astro";
+
+// Auth.js appends ?error= when it bounces a request back to the sign-in page.
+const ERROR_MESSAGES: Record<string, string> = {
+  CredentialsSignin: "Email atau kata sandi salah.",
+  SessionRequired: "Silakan masuk terlebih dahulu.",
+  AccessDenied: "Akun Anda tidak memiliki akses ke dashboard admin.",
+};
+const error = Astro.url.searchParams.get("error");
+const errorMessage = error ? (ERROR_MESSAGES[error] ?? "Email atau kata sandi salah.") : null;
+---
+
+<!-- Shared login form — credentials (email/password) via Auth.js -->
+<form id="login-form" class="mt-8 space-y-5" novalidate>
+  <Input label="Email" name="email" type="email" placeholder="" required />
+  <Input label="Kata Sandi" name="password" type="password" placeholder="" required />
+
+  <div class="flex items-center justify-between">
+    <label class="flex items-center gap-2 text-sm text-slate-600">
+      <input type="checkbox" name="remember" class="size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600" />
+      Remember
+    </label>
+    <a href="#" class="text-sm font-medium text-brand-600 hover:text-brand-700">Lupa kata sandi?</a>
+  </div>
+
+  {errorMessage && (
+    <p class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+      {errorMessage}
+    </p>
+  )}
+
+  <Button size="lg" class="w-full">Masuk</Button>
+</form>
+
+<p class="mt-8 text-center text-sm text-slate-500">
+  Belum punya akun?
+  <a href="#" class="font-medium text-brand-600 hover:text-brand-700 ml-1">Hubungi administrator Anda</a>
+</p>
+
+<script>
+  import { signIn } from "auth-astro/client";
+
+  const form = document.getElementById("login-form") as HTMLFormElement;
+  form?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    // Credentials inputs travel in the body (signIn spreads options into the POST body).
+    const res = await signIn("credentials", {
+      email: data.get("email") as string,
+      password: data.get("password") as string,
+      redirect: false,
+      callbackUrl: "/",
+    } as Parameters<typeof signIn>[1]);
+
+    if (!res) {
+      // No error returned → Auth.js navigated; fall back to the role dispatcher.
+      window.location.href = "/";
+      return;
+    }
+    const json = await res.clone().json().catch(() => ({ url: "/login?error=CredentialsSignin" }));
+    const url = new URL(json.url ?? "/login?error=1", window.location.origin);
+    if (url.searchParams.has("error")) {
+      window.location.href = `/login?error=${encodeURIComponent(url.searchParams.get("error")!)}`;
+    } else {
+      window.location.href = json.url ?? "/";
+    }
+  });
+</script>

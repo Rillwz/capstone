@@ -1,0 +1,119 @@
+---
+// Admin dashboard — overview only. The post list lives at /dashboard/posts.
+import {
+  ChevronRight,
+  LogIn,
+  MonitorSmartphone,
+  Newspaper,
+  SquarePen,
+  UserPlus,
+  Users,
+} from "@lucide/astro";
+import StatCard from "../components/ui/StatCard.astro";
+import Button from "../components/ui/Button.astro";
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../lib/auth";
+import { getStats, listPosts, listRecentLogins } from "../lib/db";
+import { describeDevice, formatDateTime } from "../lib/format";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const stats = getStats();
+const posts = listPosts(5);
+const logins = listRecentLogins(6);
+
+const firstName = (session.user?.name ?? "Admin").split(" ")[0];
+---
+
+<DashboardLayout title="Dashboard" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Halo, {firstName}</h1>
+      <p class="mt-1 text-sm text-slate-500">Ringkasan sistem dan aktivitas terbaru.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <Button variant="outline" href="/dashboard/users"><UserPlus class="size-4" />Tambah pengguna</Button>
+      <Button href="/dashboard/posts/new"><SquarePen class="size-4" />Tulis postingan</Button>
+    </div>
+  </div>
+
+  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <StatCard label="Postingan" value={stats.posts} hint="Total pengumuman">
+      <Newspaper slot="icon" class="size-5" />
+    </StatCard>
+
+    <StatCard
+      label="Pengguna"
+      value={stats.users}
+      hint={`${stats.admins} admin · ${stats.level1} level 1 · ${stats.level2} level 2`}
+    >
+      <Users slot="icon" class="size-5" />
+    </StatCard>
+
+    <StatCard label="Login (24 jam)" value={stats.logins24h} hint="Percobaan masuk yang berhasil">
+      <LogIn slot="icon" class="size-5" />
+    </StatCard>
+  </div>
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-2">
+    <section class="rounded-xl border border-slate-200 bg-white">
+      <header class="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <h2 class="text-sm font-semibold text-slate-900">Postingan terbaru</h2>
+        <a href="/dashboard/posts" class="text-sm font-medium text-brand-600 hover:text-brand-700">Lihat semua</a>
+      </header>
+
+      {
+        posts.length === 0 ? (
+          <p class="px-5 py-8 text-sm text-slate-500">Belum ada postingan.</p>
+        ) : (
+          <ul class="divide-y divide-slate-100">
+            {posts.map((post) => (
+              <li>
+                <a href={`/dashboard/posts/${post.id}`} class="group flex items-center gap-3 px-5 py-3.5">
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium text-slate-900 group-hover:text-brand-700">
+                      {post.title}
+                    </span>
+                    <span class="mt-0.5 block text-xs text-slate-500">
+                      {post.author_name} · {formatDateTime(post.created_at)}
+                      {post.updated_at !== post.created_at && " · diedit"}
+                    </span>
+                  </span>
+                  <ChevronRight class="size-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white">
+      <header class="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <h2 class="text-sm font-semibold text-slate-900">Aktivitas masuk terbaru</h2>
+        <a href="/dashboard/users" class="text-sm font-medium text-brand-600 hover:text-brand-700">Lihat pengguna</a>
+      </header>
+
+      {
+        logins.length === 0 ? (
+          <p class="px-5 py-8 text-sm text-slate-500">Belum ada riwayat login.</p>
+        ) : (
+          <ul class="divide-y divide-slate-100">
+            {logins.map((log) => (
+              <li class="flex flex-wrap items-baseline gap-x-2 px-5 py-3.5">
+                <span class="text-sm font-medium text-slate-900">{log.name}</span>
+                <span class="text-xs text-slate-500">{log.email}</span>
+                <span class="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-500">
+                  <MonitorSmartphone class="size-4 text-slate-400" />
+                  {describeDevice(log.user_agent)} · IP {log.ip}
+                </span>
+                <span class="w-full text-xs text-slate-400">{formatDateTime(log.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</DashboardLayout>

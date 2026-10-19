@@ -1,0 +1,10 @@
+---
+// Role dispatcher: the post-login callbackUrl and every brand link point here, so each
+// account lands in its own area.
+import { getSession } from "auth-astro/server";
+
+const session = await getSession(Astro.request);
+if (!session) return Astro.redirect("/login");
+
+return Astro.redirect(session.user?.role === 0 ? "/dashboard" : "/user");
+---

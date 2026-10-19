@@ -1,0 +1,56 @@
+---
+import Layout from "../layouts/Layout.astro";
+import LoginForm from "../components/LoginForm.astro";
+import PostList from "../components/PostList.astro";
+import RotatingText from "../components/RotatingText.astro";
+import BrandLogo from "../components/BrandLogo.astro";
+import { listPosts } from "../lib/db";
+
+// Announcements are readable from the login screen, so this list is public.
+const posts = listPosts(5);
+---
+
+<Layout title="Masuk">
+  <main class="flex min-h-dvh">
+    <!-- Left: brand panel (hidden on mobile) -->
+    <section class="hidden lg:flex lg:w-[45%] xl:w-1/2 flex-col justify-between bg-brand-950 p-12 text-white">
+      <a href="/" class="flex items-center gap-2.5 text-lg font-semibold">
+        <BrandLogo name="Assignment" />
+      </a>
+
+      <div class="max-w-md">
+        <h2 class="text-3xl font-semibold leading-tight tracking-tight">
+          <BrandLogo name="Assignment" logo={false} />
+        </h2>
+        <RotatingText
+          prefix="Satu platform untuk"
+          class="mt-4 text-base leading-relaxed text-brand-200"
+          phrases={[
+            "mengelola perencanaan tenaga kerja.",
+            "mendistribusikan tugas.",
+            "memantau progres.",
+            "mengukur kinerja secara terarah.",
+          ]}
+          interval={3}
+        />
+
+        {posts.length > 0 && <PostList posts={posts} idPrefix="panel" tone="dark" class="mt-10" />}
+      </div>
+
+      <p class="text-sm text-brand-300">© 2026 Capstone Project</p>
+    </section>
+
+    <!-- Right: login form -->
+    <section class="flex min-w-0 flex-1 items-center justify-center px-5 py-12 sm:px-8">
+      <div class="w-full max-w-sm">
+
+        <h1 class="text-2xl font-semibold tracking-tight text-slate-900">Assignment</h1>
+        <p class="mt-2 text-sm text-slate-500">Masukkan kredensial Anda untuk mengakses akun.</p>
+
+        <LoginForm />
+
+        {posts.length > 0 && <PostList posts={posts} idPrefix="form" class="mt-10 lg:hidden" />}
+      </div>
+    </section>
+  </main>
+</Layout>

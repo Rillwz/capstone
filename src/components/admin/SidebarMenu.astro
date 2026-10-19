@@ -1,0 +1,107 @@
+---
+// Floating sidebar menu — the navigation below lg, where the docked sidebar is hidden.
+// It is a modal <dialog>, so Esc, the focus trap and the backdrop come from the
+// browser; the panel itself floats inset from the viewport (see .menu-dialog). The list
+// is SidebarNav, shared with the docked sidebar in DashboardLayout.
+import { LogOut, PanelLeft, X } from "@lucide/astro";
+import type { AstroComponent } from "@lucide/astro";
+import SidebarNav from "./SidebarNav.astro";
+
+interface Props {
+  items: Array<{ href: string; label: string; icon: AstroComponent; active: boolean }>;
+  user?: { name?: string | null; email?: string | null };
+  class?: string;
+}
+
+const { items, user, class: className } = Astro.props;
+
+const dialogId = "dashboard-menu";
+
+const initials = (user?.name ?? "A")
+  .split(/\s+/)
+  .filter(Boolean)
+  .slice(0, 2)
+  .map((word) => word[0]!.toUpperCase())
+  .join("");
+---
+
+<button
+  type="button"
+  data-menu-open
+  aria-controls={dialogId}
+  aria-haspopup="dialog"
+  aria-expanded="false"
+  aria-label="Buka menu"
+  class:list={[
+    "inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 lg:hidden",
+    className,
+  ]}
+>
+  <PanelLeft class="size-5" />
+</button>
+
+<dialog id={dialogId} class="menu-dialog" aria-label="Menu navigasi">
+  <div class="flex h-full flex-col">
+    <div class="flex items-center gap-3 border-b border-slate-200 p-4">
+      <span class="grid size-10 shrink-0 place-items-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
+        {initials}
+      </span>
+      <div class="min-w-0 flex-1">
+        <p class="truncate text-sm font-semibold text-slate-900">{user?.name ?? "Admin"}</p>
+        <p class="truncate text-xs text-slate-500">{user?.email}</p>
+      </div>
+      <button
+        type="button"
+        data-menu-close
+        aria-label="Tutup menu"
+        class="-mr-1 grid size-9 shrink-0 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <X class="size-5" />
+      </button>
+    </div>
+
+    <SidebarNav items={items} class="flex-1 overflow-y-auto overscroll-contain p-3" />
+
+    <div class="border-t border-slate-200 p-3">
+      <a
+        href="/api/auth/signout"
+        data-signout
+        class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+      >
+        <LogOut class="size-4 shrink-0" />
+        Keluar
+      </a>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  const menu = document.getElementById("dashboard-menu") as HTMLDialogElement | null;
+  const trigger = document.querySelector<HTMLButtonElement>("[data-menu-open]");
+
+  if (menu && trigger) {
+    const setExpanded = (open: boolean) => trigger.setAttribute("aria-expanded", String(open));
+
+    trigger.addEventListener("click", () => {
+      setExpanded(true);
+      menu.showModal();
+      // A modal <dialog> blocks interaction but not page scrolling.
+      document.documentElement.style.overflow = "hidden";
+    });
+
+    menu.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+      setExpanded(false);
+    });
+
+    menu.querySelector<HTMLButtonElement>("[data-menu-close]")?.addEventListener("click", () => menu.close());
+    // Click on the backdrop (the dialog element itself) closes.
+    menu.addEventListener("click", (event) => {
+      if (event.target === menu) menu.close();
+    });
+    // Rotating a tablet past the breakpoint leaves the header nav in charge.
+    matchMedia("(min-width: 64rem)").addEventListener("change", (event) => {
+      if (event.matches) menu.close();
+    });
+  }
+</script>

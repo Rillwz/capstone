@@ -1,0 +1,93 @@
+---
+// Profil — any signed-in account (admin included) can change its own name and password
+// here. The email is the login identity and stays read-only; only the admin manages it.
+import { Check } from "@lucide/astro";
+import bcrypt from "bcryptjs";
+import Button from "../components/ui/Button.astro";
+import Input from "../components/ui/Input.astro";
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import { requireSession } from "../lib/auth";
+import { updateUserProfile } from "../lib/db";
+
+const session = await requireSession(Astro);
+if (session instanceof Response) return session;
+
+const user = session.user!;
+const id = Number(user.id);
+if (!Number.isInteger(id)) return Astro.redirect("/login?error=SessionRequired");
+
+let error: string | undefined;
+let name = user.name ?? "";
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  name = String(form.get("name") ?? "").trim();
+  const password = String(form.get("password") ?? "");
+  const confirm = String(form.get("confirm") ?? "");
+
+  if (name.length < 2) {
+    error = "Nama lengkap minimal 2 karakter.";
+  } else if (password && password.length < 8) {
+    error = "Kata sandi minimal 8 karakter.";
+  } else if (password !== confirm) {
+    error = "Ulangi kata sandi tidak sama.";
+  } else {
+    updateUserProfile(id, name, password ? await bcrypt.hash(password, 10) : undefined);
+    return Astro.redirect("/profile?saved=1");
+  }
+}
+
+const justSaved = Astro.url.searchParams.has("saved");
+---
+
+<DashboardLayout title="Profil" user={user}>
+  <div>
+    <h1 class="text-xl font-semibold text-slate-900">Profil</h1>
+    <p class="mt-1 text-sm text-slate-500">Ubah nama dan kata sandi akun Anda.</p>
+  </div>
+
+  {
+    justSaved && (
+      <p data-notice class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+        Perubahan disimpan.
+      </p>
+    )
+  }
+
+  <form method="POST" class="mt-6 max-w-xl rounded-xl border border-slate-200 bg-white p-6">
+    <div class="space-y-4">
+      <Input label="Nama lengkap" name="name" value={name} required />
+      <Input label="Email" name="email" type="email" value={user.email ?? ""} disabled />
+    </div>
+
+    <div class="mt-6 space-y-4 border-t border-slate-200 pt-6">
+      <h2 class="text-sm font-semibold text-slate-900">Ganti kata sandi</h2>
+      <Input label="Kata sandi baru" name="password" type="password" />
+      <Input label="Ulangi kata sandi baru" name="confirm" type="password" />
+      <p class="text-xs text-slate-500">Minimal 8 karakter. Biarkan kosong jika tidak ingin menggantinya.</p>
+    </div>
+
+    {error && <p class="mt-4 text-sm text-red-600" role="alert">{error}</p>}
+
+    <div class="mt-6 flex justify-end">
+      <Button type="submit"><Check class="size-4" />Simpan</Button>
+    </div>
+  </form>
+</DashboardLayout>
+
+<script>
+  // Flash notice ("Perubahan disimpan.") leaves on its own after 4s, and the query param
+  // goes with it so a refresh cannot show it twice.
+  const notice = document.querySelector<HTMLElement>("[data-notice]");
+  if (notice) {
+    setTimeout(() => {
+      notice.classList.add("is-leaving");
+      setTimeout(() => {
+        notice.remove();
+        const url = new URL(location.href);
+        url.searchParams.delete("saved");
+        history.replaceState(null, "", url.pathname + url.search);
+      }, 400);
+    }, 4000);
+  }
+</script>

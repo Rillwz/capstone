@@ -1,0 +1,92 @@
+---
+// Text input with label + error, used inside forms. Password inputs get a show/hide
+// toggle; the button carries its own label and aria-pressed state, the script below
+// does the type switch.
+import { Eye, EyeOff } from "@lucide/astro";
+
+interface Props {
+  label: string;
+  name: string;
+  type?: "text" | "email" | "password" | "number" | "tel" | "url" | "date";
+  placeholder?: string;
+  value?: string;
+  required?: boolean;
+  disabled?: boolean;
+  error?: string;
+  /** Numeric keypad on phones, without the number-input stepper arrows. */
+  inputmode?: "numeric";
+  class?: string;
+}
+
+const { label, name, type = "text", placeholder, value, required, disabled, error, inputmode, class: className } =
+  Astro.props;
+const id = `field-${name}`;
+const isPassword = type === "password";
+---
+
+<div class={className}>
+  <label for={id} class="mb-1.5 block text-sm font-medium text-slate-700">
+    {label}{required && <span class="text-brand-600"> *</span>}
+  </label>
+  <div class="relative">
+    <input
+      id={id}
+      name={name}
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      required={required}
+      disabled={disabled}
+      aria-invalid={error ? "true" : undefined}
+      aria-describedby={error ? `${id}-error` : undefined}
+      inputmode={inputmode}
+      class:list={[
+        "h-11 w-full rounded-lg border bg-white px-3.5 text-sm text-slate-900 placeholder:text-slate-400",
+        "disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500",
+        isPassword && "pr-11",
+        "focus:outline-2 focus:outline-offset-0",
+        error
+          ? "border-red-400 focus:outline-red-500"
+          : "border-slate-300 focus:outline-brand-600 focus:border-brand-600",
+      ]}
+    />
+    {
+      isPassword && (
+        <button
+          type="button"
+          data-reveal-toggle
+          aria-controls={id}
+          aria-pressed="false"
+          aria-label="Tampilkan kata sandi"
+          class="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-400 transition-colors hover:text-slate-900 focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <Eye class="size-4" />
+          <EyeOff class="hidden size-4" />
+        </button>
+      )
+    }
+  </div>
+  {error && <p id={`${id}-error`} class="mt-1.5 text-sm text-red-600">{error}</p>}
+</div>
+
+<script>
+  // Password reveal ("unhide"). One listener per button keeps the markup declarative —
+  // the field, its label text and the button state are all readable from the DOM.
+  document.querySelectorAll<HTMLButtonElement>("[data-reveal-toggle]").forEach((button) => {
+    const input = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    const [eye, eyeOff] = button.querySelectorAll("svg");
+    if (!(input instanceof HTMLInputElement) || !eye || !eyeOff) return;
+
+    button.addEventListener("click", (event) => {
+      const reveal = input.type === "password";
+      input.type = reveal ? "text" : "password";
+      button.setAttribute("aria-pressed", String(reveal));
+      button.setAttribute("aria-label", reveal ? "Sembunyikan kata sandi" : "Tampilkan kata sandi");
+      eye.classList.toggle("hidden", reveal);
+      eyeOff.classList.toggle("hidden", !reveal);
+      // Pointer users keep typing straight away; keyboard users stay on the button
+      // (event.detail is 0 when the click comes from the keyboard).
+      if (event.detail > 0) input.focus({ preventScroll: true });
+    });
+  });
+</script>

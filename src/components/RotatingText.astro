@@ -1,0 +1,194 @@
+---
+// Rotating headline. Intro timeline: the prefix rises in first, then the phrases
+// cascade in and rotation starts. Later swaps hand off with a word-by-word focus
+// cascade; a thin progress line times the next swap. Rotation pauses on hover /
+// hidden tab and is skipped entirely under prefers-reduced-motion.
+type Props = {
+  prefix?: string;
+  phrases: string[];
+  /** Seconds each phrase stays on screen before swapping. */
+  interval?: number;
+  class?: string;
+};
+
+const { prefix = "", phrases, interval = 5, class: className } = Astro.props;
+---
+
+<p class={className}>
+  {prefix && <span class="rotator-prefix">{prefix} </span>}
+  <span class="relative inline-block align-bottom overflow-hidden">
+    <span class="rotator relative inline-flex flex-col" data-interval={interval}>
+      <span class="rotator-live sr-only" aria-live="polite">{phrases[0]}</span>
+      {phrases.map((phrase, i) => (
+        <span
+          class="rotator-item absolute inset-0 flex justify-start will-change-transform"
+          data-active={i === 0 ? "true" : undefined}
+          aria-hidden="true"
+        >
+          <span class="rotator-words whitespace-nowrap">
+            {phrase.split(" ").map((word, wi, arr) => [
+              <span class="rotator-word">{word}</span>,
+              wi < arr.length - 1 ? " " : null,
+            ])}
+          </span>
+        </span>
+      ))}
+      {/* Spacer keeps container width = widest phrase, height = one line */}
+      <span class="rotator-item rotator-spacer invisible static flex whitespace-nowrap" aria-hidden="true">
+        <span>{phrases[0]}</span>
+      </span>
+      <span
+        class="rotator-progress pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left rounded-full bg-current opacity-30"
+        style="transform: scaleX(0)"></span>
+    </span>
+  </span>
+</p>
+
+<style>
+  .rotator-item {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  .rotator-item[data-active="true"] {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .rotator-spacer {
+    opacity: 1;
+    transform: none;
+  }
+</style>
+
+<script>
+  import { animate, stagger } from "motion";
+
+  // One curve for every move keeps the choreography coherent (easeOutQuint-ish).
+  const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+  // Exit lingers, then whips away — pairs with the incoming phrase instead of
+  // vanishing first and leaving a beat of empty space.
+  const EASE_IN: [number, number, number, number] = [0.6, 0, 0.8, 0.3];
+  // Intro timeline on appear: prefix rises, hold for INTRO_GAP seconds, then the
+  // phrase cascade starts (and with it the rotation timer). The gap is measured
+  // from the prefix start, so it reads as a short breath after the prefix lands.
+  const INTRO_GAP = 0.9;
+
+  document.querySelectorAll<HTMLElement>(".rotator").forEach((rotator) => {
+    // Rotation list = every phrase item except the invisible spacer.
+    const items = Array.from(rotator.querySelectorAll<HTMLElement>(".rotator-item")).filter(
+      (el) => !el.classList.contains("rotator-spacer"),
+    );
+    if (items.length < 2) return;
+    // Reduced motion: leave the first phrase static, no rotation at all.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const live = rotator.querySelector<HTMLElement>(".rotator-live");
+    const progress = rotator.querySelector<HTMLElement>(".rotator-progress");
+    const interval = (Number(rotator.dataset.interval) || 5) * 1000;
+    const wordsOf = (el: HTMLElement) => el.querySelectorAll<HTMLElement>(".rotator-word");
+
+    let index = Math.max(0, items.findIndex((el) => el.dataset.active === "true"));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let bar: ReturnType<typeof animate> | undefined;
+    let remaining = interval;
+    let startedAt = 0;
+    let introDone = false;
+
+    const enter = (el: HTMLElement, delay = 0) => {
+      el.setAttribute("data-active", "true");
+      animate(
+        el,
+        { opacity: [0, 1], transform: ["translateY(-100%)", "translateY(0%)"], filter: ["blur(4px)", "blur(0px)"] },
+        { duration: 0.55, ease: EASE, delay },
+      );
+      // Words resolve one by one — reads like a focus pull, not a block swap.
+      animate(
+        wordsOf(el),
+        { opacity: [0, 1], filter: ["blur(6px)", "blur(0px)"] },
+        { duration: 0.5, ease: EASE, delay: stagger(0.035, { startDelay: delay + 0.08 }) },
+      );
+    };
+
+    const exit = (el: HTMLElement) => {
+      // Freeze the current visual state inline first (the SSR item has none),
+      // then free up data-active for the incoming phrase.
+      el.style.opacity = "1";
+      el.style.transform = "translateY(0%)";
+      el.style.filter = "blur(0px)";
+      el.removeAttribute("data-active");
+      animate(
+        el,
+        { opacity: [1, 0], transform: ["translateY(0%)", "translateY(100%)"], filter: ["blur(0px)", "blur(4px)"] },
+        { duration: 0.5, ease: EASE_IN },
+      );
+    };
+
+    const tick = () => {
+      const current = items[index];
+      index = (index + 1) % items.length;
+      const next = items[index];
+      exit(current);
+      enter(next, 0.12); // short crossfade so there is never a blank beat
+      if (live) live.textContent = next.textContent?.trim() ?? "";
+    };
+
+    // Progress line = time until the next swap, paused/resumed with the timer.
+    const barTo = (from: number, duration: number) => {
+      if (!progress) return;
+      bar?.stop();
+      bar = animate(
+        progress,
+        { transform: [`scaleX(${from})`, "scaleX(1)"] },
+        { duration: duration / 1000, ease: "linear" },
+      );
+    };
+
+    const play = () => {
+      if (timer || !introDone) return;
+      startedAt = Date.now();
+      barTo(1 - remaining / interval, remaining);
+      timer = setTimeout(() => {
+        timer = undefined;
+        remaining = interval;
+        tick();
+        play();
+      }, remaining);
+    };
+
+    const pause = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = undefined;
+      remaining -= Date.now() - startedAt;
+      bar?.pause();
+    };
+
+    // Intro: prefix rises first; the first phrase stays hidden until its slot.
+    const prefixEl = rotator.closest("p")?.querySelector<HTMLElement>(".rotator-prefix") ?? null;
+    const firstWords = wordsOf(items[index]);
+    firstWords.forEach((w) => (w.style.opacity = "0"));
+    if (prefixEl) {
+      animate(
+        prefixEl,
+        { opacity: [0, 1], transform: ["translateY(0.35em)", "translateY(0)"], filter: ["blur(4px)", "blur(0px)"] },
+        { duration: 0.6, ease: EASE },
+      );
+    }
+    animate(
+      firstWords,
+      { opacity: [0, 1], filter: ["blur(6px)", "blur(0px)"] },
+      { duration: 0.6, ease: EASE, delay: stagger(0.035, { startDelay: INTRO_GAP }) },
+    );
+    // Rotation joins in with the phrase cascade, so the first phrase gets a full
+    // interval of screen time (and a progress line) like every other one.
+    setTimeout(() => {
+      introDone = true;
+      play();
+    }, INTRO_GAP * 1000);
+
+    rotator.addEventListener("mouseenter", pause);
+    rotator.addEventListener("mouseleave", play);
+    document.addEventListener("visibilitychange", () => (document.hidden ? pause() : play()));
+    // Clean up when Astro swaps the page (view transitions / nav).
+    document.addEventListener("astro:before-swap", pause, { once: true });
+  });
+</script>

@@ -1,0 +1,146 @@
+---
+// Markdown editor with a live preview pane ("semacam WYSIWYG").
+// Posts to the current URL — the page decides create vs. update.
+import { Bold, Code, Heading2, Italic, Link, List, Quote, X } from "@lucide/astro";
+import Button from "../ui/Button.astro";
+import Input from "../ui/Input.astro";
+
+interface Props {
+  post?: { title: string; body: string };
+  error?: string;
+  submitLabel?: string;
+}
+
+const { post, error, submitLabel = "Simpan" } = Astro.props;
+
+const tools = [
+  { md: "bold", icon: Bold, label: "Tebal" },
+  { md: "italic", icon: Italic, label: "Miring" },
+  { md: "heading", icon: Heading2, label: "Sub-judul" },
+  { md: "list", icon: List, label: "Daftar" },
+  { md: "quote", icon: Quote, label: "Kutipan" },
+  { md: "code", icon: Code, label: "Kode" },
+  { md: "link", icon: Link, label: "Tautan" },
+];
+---
+
+{error && (
+  <p class="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+    {error}
+  </p>
+)}
+
+<form method="POST" class="space-y-4">
+  <Input label="Judul" name="title" value={post?.title} placeholder="Judul postingan" required />
+
+  <div>
+    <div class="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+      <span class="text-sm font-medium text-slate-700">
+        Isi <span class="text-slate-400">(Markdown)</span>
+      </span>
+      <div class="flex items-center gap-1" role="toolbar" aria-label="Pemformatan">
+        {tools.map(({ md, icon: Icon, label }) => (
+          <button
+            type="button"
+            data-md={md}
+            title={label}
+            aria-label={label}
+            class="grid size-8 place-items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+          >
+            <Icon class="size-4" />
+          </button>
+        ))}
+      </div>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+      <textarea
+        id="body"
+        name="body"
+        rows="18"
+        required
+        placeholder={"# Judul\n\nTulis pengumuman di sini…\n\n- poin pertama\n- poin kedua"}
+        class="min-h-[26rem] w-full resize-y rounded-lg border border-slate-300 bg-white p-3.5 font-mono text-sm leading-relaxed text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+      >{post?.body}</textarea>
+
+      <div class="min-h-[26rem] overflow-y-auto rounded-lg border border-slate-200 bg-white p-5">
+        <p class="mb-3 text-xs font-medium tracking-wide text-slate-400 uppercase">Pratinjau</p>
+        <div id="preview" class="prose-md"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <Button type="submit">{submitLabel}</Button>
+    <Button variant="outline" href="/dashboard/posts"><X class="size-4" />Batal</Button>
+  </div>
+</form>
+
+<script>
+  import { marked } from "marked";
+
+  // Pratinjau = markdown server yang sama, dirender di klien.
+  marked.use({ gfm: true, breaks: true });
+
+  const textarea = document.getElementById("body") as HTMLTextAreaElement | null;
+  const preview = document.getElementById("preview");
+  // shortcut: konten hanya ditulis admin (trusted), jadi HTML mentah tidak disanitasi.
+  // Sanitasi kalau nanti postingan bisa ditulis pengguna biasa.
+
+  if (textarea && preview) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const render = () => {
+      preview.innerHTML = marked.parse(textarea.value, { async: false }) as string;
+    };
+
+    textarea.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(render, 120);
+    });
+    render();
+
+    // Toolbar: wrap/replace the current selection.
+    const wrap = (before: string, after = before) => {
+      const { selectionStart: s, selectionEnd: e, value } = textarea;
+      const selected = value.slice(s, e) || "teks";
+      textarea.setRangeText(`${before}${selected}${after}`, s, e, "end");
+      textarea.focus();
+      render();
+    };
+
+    const prefixLines = (marker: string) => {
+      const { selectionStart: s, selectionEnd: e, value } = textarea;
+      const start = value.lastIndexOf("\n", s - 1) + 1;
+      const end = value.indexOf("\n", e) === -1 ? value.length : value.indexOf("\n", e);
+      const block = value
+        .slice(start, end)
+        .split("\n")
+        .map((line) => `${marker}${line}`)
+        .join("\n");
+      textarea.setRangeText(block, start, end, "end");
+      textarea.focus();
+      render();
+    };
+
+    document.querySelectorAll<HTMLButtonElement>("[data-md]").forEach((button) => {
+      button.addEventListener("click", () => {
+        switch (button.dataset.md) {
+          case "bold":
+            return wrap("**");
+          case "italic":
+            return wrap("_");
+          case "heading":
+            return prefixLines("## ");
+          case "list":
+            return prefixLines("- ");
+          case "quote":
+            return prefixLines("> ");
+          case "code":
+            return wrap("\n```\n", "\n```\n");
+          case "link":
+            return wrap("[", "](https://)");
+        }
+      });
+    });
+  }
+</script>

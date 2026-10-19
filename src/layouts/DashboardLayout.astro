@@ -1,0 +1,89 @@
+---
+// Shell for both dashboard areas (admin and level 1/2). At lg+ the menu is docked in a
+// sidebar beside the content; below lg the same list slides in from the header trigger
+// (SidebarMenu), so there is one source for the nav either way. Only the list and the
+// brand link differ per role.
+import { LayoutDashboard, LogOut, Newspaper, Tags, ClipboardCheck, RotateCcwClock, UserRound, Users } from "@lucide/astro";
+import SidebarMenu from "../components/admin/SidebarMenu.astro";
+import SidebarNav from "../components/admin/SidebarNav.astro";
+import Layout from "./Layout.astro";
+
+interface Props {
+  title: string;
+  user?: { name?: string | null; email?: string | null; role?: number };
+}
+
+const { title, user } = Astro.props;
+
+const isAdmin = user?.role === 0;
+
+const nav = isAdmin
+  ? [
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/dashboard/assignments", label: "Penugasan", icon: ClipboardCheck },
+      { href: "/dashboard/posts", label: "Postingan", icon: Newspaper },
+      { href: "/dashboard/categories", label: "Kategori", icon: Tags },
+      { href: "/dashboard/users", label: "Pengguna", icon: Users },
+      { href: "/profile", label: "Profil", icon: UserRound },
+    ]
+  : [
+      { href: "/user", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/user/riwayat", label: "Riwayat", icon: RotateCcwClock },
+      { href: "/profile", label: "Profil", icon: UserRound },
+    ];
+
+const home = isAdmin ? "/dashboard" : "/user";
+
+const path = Astro.url.pathname;
+const isActive = (href: string) => (href === home ? path === href : path.startsWith(href));
+const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
+---
+
+<Layout title={title}>
+  <div class="min-h-dvh bg-slate-50">
+    <header class="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div class="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3.5 sm:gap-6 sm:px-6 lg:max-w-7xl">
+        <SidebarMenu items={items} user={user} />
+
+        <a href={home} class="text-base font-semibold tracking-tight text-slate-900">
+          Assignment<span class="text-brand-600">+</span>
+        </a>
+
+        <div class="ml-auto flex items-center gap-3">
+          <span class="hidden text-sm text-slate-500 sm:inline">{user?.name}</span>
+          <a
+            href="/api/auth/signout"
+            data-signout
+            class="hidden items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 lg:inline-flex"
+          >
+            <LogOut class="size-4" />
+            Keluar
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="mx-auto flex max-w-6xl items-start gap-6 px-4 py-8 sm:px-6 lg:max-w-7xl">
+      <aside class="sticky top-20 hidden w-60 shrink-0 lg:block">
+        <SidebarNav items={items} class="rounded-xl border border-slate-200 bg-white p-3" />
+      </aside>
+
+      <main class="min-w-0 flex-1">
+        <slot />
+      </main>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // "Keluar" signs out immediately: the plain link stays as the no-JS fallback, but with
+  // JS we post the CSRF-protected signout instead of landing on Auth.js' confirm page.
+  import { signOut } from "auth-astro/client";
+
+  document.querySelectorAll<HTMLAnchorElement>("[data-signout]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      void signOut({ callbackUrl: "/login" });
+    });
+  });
+</script>

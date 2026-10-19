@@ -1,0 +1,38 @@
+---
+// Kategori — index of the 11 work units; each one has its own page.
+import { ChevronRight } from "@lucide/astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../../lib/auth";
+import { categories } from "../../lib/categories";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+---
+
+<DashboardLayout title="Kategori" user={session.user}>
+  <div>
+    <h1 class="text-xl font-semibold text-slate-900">Kategori</h1>
+    <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
+  </div>
+
+  <ul class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    {
+      categories.map(({ id, label, icon: Icon }) => (
+        <li>
+          <a
+            href={`/dashboard/categories/${id}`}
+            class="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-colors hover:border-brand-300 hover:bg-brand-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+          >
+            <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">
+              <Icon class="size-4" />
+            </span>
+            <span class="min-w-0 flex-1 text-sm font-medium tracking-wide text-slate-900 uppercase group-hover:text-brand-700">
+              {label}
+            </span>
+            <ChevronRight class="size-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</DashboardLayout>

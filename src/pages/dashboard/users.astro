@@ -1,0 +1,320 @@
+---
+// User management — create (default password) and delete. Passwords are only ever
+// stored as bcrypt hashes and are never selected for this page.
+//
+// Deleting is a two-step flow: confirm in a modal, then a 15 second undo window
+// before the form is actually posted. That window lives in the page, so refreshing
+// or leaving in the meantime cancels the deletion (by design).
+import { Lock, MonitorSmartphone, Trash, TriangleAlert, Undo2, UserPlus, X } from "@lucide/astro";
+import bcrypt from "bcryptjs";
+import PasswordReveal from "../../components/admin/PasswordReveal.astro";
+import Button from "../../components/ui/Button.astro";
+import Input from "../../components/ui/Input.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../../lib/auth";
+import { createUser, deleteUser, listUsers } from "../../lib/db";
+import { DEFAULT_USER_PASSWORD } from "../../lib/defaults";
+import { describeDevice, formatDateTime, roleLabel } from "../../lib/format";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const currentUser = session.user;
+
+let error: string | undefined;
+let name = "";
+let email = "";
+let role = 1;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = form.get("action");
+
+  if (action === "create") {
+    name = String(form.get("name") ?? "").trim();
+    email = String(form.get("email") ?? "").trim().toLowerCase();
+    role = Number(form.get("role"));
+
+    if (name.length < 2) {
+      error = "Nama lengkap minimal 2 karakter.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      error = "Format email tidak valid.";
+    } else if (role !== 1 && role !== 2) {
+      error = "Level pengguna tidak valid.";
+    } else {
+      try {
+        createUser(name, email, await bcrypt.hash(DEFAULT_USER_PASSWORD, 10), role === 2 ? 2 : 1);
+        return Astro.redirect("/dashboard/users?created=1");
+      } catch {
+        error = "Email sudah terdaftar.";
+      }
+    }
+  }
+
+  if (action === "delete") {
+    const id = Number(form.get("id"));
+    const target = listUsers().find((u) => u.id === id);
+    // Admins are never deletable from the UI (and never delete your own account).
+    if (target && target.role !== 0 && target.id !== Number(currentUser.id)) {
+      deleteUser(target.id);
+    }
+    return Astro.redirect("/dashboard/users");
+  }
+}
+
+const users = listUsers();
+const justCreated = Astro.url.searchParams.has("created");
+---
+
+<DashboardLayout title="Pengguna" user={currentUser}>
+  <div>
+    <h1 class="text-xl font-semibold text-slate-900">Pengguna</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      Buat akun baru dengan kata sandi default, atau hapus akun yang tidak dipakai.
+    </p>
+  </div>
+
+  {
+    justCreated && (
+      <p class="mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+        Pengguna berhasil dibuat. Sampaikan kata sandi default{" "}
+        <PasswordReveal value={DEFAULT_USER_PASSWORD} /> kepada pengguna, lalu minta segera
+        menggantinya.
+      </p>
+    )
+  }
+
+  <form method="POST" class="mt-6 rounded-xl border border-slate-200 bg-white p-6">
+    <input type="hidden" name="action" value="create" />
+    <h2 class="text-sm font-semibold text-slate-900">Tambah pengguna</h2>
+
+    <div class="mt-4 grid gap-4 sm:grid-cols-3">
+      <Input label="Nama lengkap" name="name" value={name} required />
+      <Input label="Email" name="email" type="email" value={email} required />
+      <div>
+        <label for="field-role" class="mb-1.5 block text-sm font-medium text-slate-700">
+          Level <span class="text-slate-400">(akses)</span>
+        </label>
+        <select
+          id="field-role"
+          name="role"
+          class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+        >
+          <option value="1" selected={role === 1}>Level 1</option>
+          <option value="2" selected={role === 2}>Level 2</option>
+        </select>
+      </div>
+    </div>
+
+    {error && <p class="mt-3 text-sm text-red-600" role="alert">{error}</p>}
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <p class="flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
+        Kata sandi default:
+        <PasswordReveal value={DEFAULT_USER_PASSWORD} />
+      </p>
+      <Button type="submit"><UserPlus class="size-4" />Tambah pengguna</Button>
+    </div>
+  </form>
+
+  <div class="mt-8 flex flex-wrap items-end justify-between gap-2">
+    <h2 class="text-sm font-semibold text-slate-900">Daftar pengguna</h2>
+    <p class="inline-flex items-center gap-1.5 text-xs text-slate-500">
+      <Lock class="size-4 text-slate-400" />
+      Kata sandi tersimpan sebagai hash dan tidak dapat dilihat.
+    </p>
+  </div>
+
+  <div class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <table class="w-full min-w-[52rem] text-left text-sm">
+      <thead class="border-b border-slate-200 text-xs tracking-wide text-slate-500 uppercase">
+        <tr>
+          <th class="px-5 py-3 font-medium">Nama</th>
+          <th class="px-5 py-3 font-medium">Email</th>
+          <th class="px-5 py-3 font-medium">Level</th>
+          <th class="px-5 py-3 font-medium">Terakhir masuk</th>
+          <th class="px-5 py-3" />
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {
+          users.map((user) => (
+            <tr class="align-top">
+              <td class="px-5 py-3.5 font-medium text-slate-900">{user.name}</td>
+              <td class="px-5 py-3.5 text-slate-600">{user.email}</td>
+              <td class="px-5 py-3.5">
+                <span
+                  class:list={[
+                    "rounded-full px-2.5 py-1 text-xs font-medium",
+                    user.role === 0 ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600",
+                  ]}
+                >
+                  {roleLabel(user.role)}
+                </span>
+              </td>
+              <td class="px-5 py-3.5 text-slate-600">
+                {user.last_login ? (
+                  <>
+                    <span class="inline-flex items-center gap-1.5 text-slate-900">
+                      <MonitorSmartphone class="size-4 text-slate-400" />
+                      {describeDevice(user.last_login.user_agent)}
+                    </span>
+                    <span class="mt-0.5 block text-xs text-slate-500">
+                      IP {user.last_login.ip} · {formatDateTime(user.last_login.created_at)}
+                    </span>
+                  </>
+                ) : (
+                  <span class="text-slate-400">Belum pernah masuk</span>
+                )}
+              </td>
+              <td class="px-5 py-3.5 text-right">
+                {user.role !== 0 && user.id !== Number(currentUser.id) && (
+                  <form method="POST" data-name={user.name} data-email={user.email}>
+                    <input type="hidden" name="action" value="delete" />
+                    <input type="hidden" name="id" value={user.id} />
+                    <Button variant="danger" size="sm" type="submit" data-delete-open>
+                      <Trash class="size-4" />
+                      Hapus
+                    </Button>
+                  </form>
+                )}
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <dialog
+    id="delete-dialog"
+    class="app-dialog w-[calc(100vw-2rem)] max-w-md"
+    aria-labelledby="delete-dialog-title"
+  >
+    <div class="p-5 sm:p-6">
+      <div class="flex items-start gap-3">
+        <span class="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">
+          <TriangleAlert class="size-5" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <h2 id="delete-dialog-title" class="text-base font-semibold text-slate-900">
+            Hapus pengguna ini?
+          </h2>
+          <p class="mt-1.5 text-sm text-slate-600">
+            <span data-dialog-name class="font-medium text-slate-900"></span>
+            <span data-dialog-email class="mt-0.5 block text-xs text-slate-500"></span>
+          </p>
+          <p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+            Akun, riwayat login, dan postingannya akan dihapus permanen. Tindakan ini tidak dapat
+            dibatalkan setelah 15 detik.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="outline" type="button" data-dialog-cancel>
+          <X class="size-4" />
+          Batal
+        </Button>
+        <Button variant="dangerSolid" type="button" data-dialog-confirm>
+          <Trash class="size-4" />
+          Ya, hapus
+        </Button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="delete-pending" hidden role="status" aria-live="polite" class="fixed inset-x-0 bottom-6 z-50 px-4">
+    <div class="mx-auto w-full max-w-sm overflow-hidden rounded-xl bg-slate-900 text-white shadow-2xl">
+      <div class="flex items-center gap-3 px-4 py-3">
+        <Trash class="size-4 shrink-0 text-slate-400" />
+        <p class="min-w-0 flex-1 text-sm">
+          Menghapus <span data-pending-name class="font-semibold"></span>…
+        </p>
+        <button
+          type="button"
+          data-pending-undo
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-300 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+        >
+          <Undo2 class="size-4" />
+          Batalkan
+        </button>
+      </div>
+      <div class="h-1 bg-white/15">
+        <div data-pending-progress class="h-full bg-brand-400"></div>
+      </div>
+    </div>
+  </div>
+</DashboardLayout>
+
+<script>
+  const UNDO_MS = 15000;
+
+  const dialog = document.getElementById("delete-dialog") as HTMLDialogElement;
+  const confirmButton = dialog.querySelector<HTMLButtonElement>("[data-dialog-confirm]")!;
+  const cancelButton = dialog.querySelector<HTMLButtonElement>("[data-dialog-cancel]")!;
+  const dialogName = dialog.querySelector<HTMLElement>("[data-dialog-name]")!;
+  const dialogEmail = dialog.querySelector<HTMLElement>("[data-dialog-email]")!;
+
+  const notice = document.getElementById("delete-pending") as HTMLElement;
+  const noticeName = notice.querySelector<HTMLElement>("[data-pending-name]")!;
+  const noticeProgress = notice.querySelector<HTMLElement>("[data-pending-progress]")!;
+  const undoButton = notice.querySelector<HTMLButtonElement>("[data-pending-undo]")!;
+
+  const triggers = [...document.querySelectorAll<HTMLButtonElement>("[data-delete-open]")];
+
+  let asked: HTMLFormElement | null = null; // row currently shown in the modal
+  let pending: HTMLFormElement | null = null; // row waiting out the undo window
+  let timer: number | undefined;
+
+  // shortcut: one pending delete at a time — the final POST reloads the page, so a
+  // second row would silently lose its own countdown. Move to fetch + row removal
+  // if batch deletes are ever needed.
+  const lockRows = (locked: boolean) => triggers.forEach((trigger) => (trigger.disabled = locked));
+
+  const cancelPending = () => {
+    window.clearTimeout(timer);
+    pending?.closest("tr")?.classList.remove("opacity-50");
+    pending = null;
+    lockRows(false);
+    notice.hidden = true;
+    noticeProgress.classList.remove("pending-countdown");
+  };
+
+  triggers.forEach((trigger) => {
+    trigger.addEventListener("click", (event) => {
+      // Without JS the plain form submit stays in charge; with JS the modal asks first.
+      event.preventDefault();
+      asked = trigger.closest("form");
+      dialogName.textContent = asked?.dataset.name ?? "";
+      dialogEmail.textContent = asked?.dataset.email ?? "";
+      dialog.showModal();
+    });
+  });
+
+  cancelButton.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => (asked = null));
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  confirmButton.addEventListener("click", () => {
+    const row = asked;
+    dialog.close();
+    if (!row || pending) return;
+
+    pending = row;
+    row.closest("tr")?.classList.add("opacity-50");
+    lockRows(true);
+
+    noticeName.textContent = row.dataset.name ?? "";
+    notice.hidden = false;
+    noticeProgress.classList.remove("pending-countdown");
+    void noticeProgress.offsetWidth; // restart the bar on a repeat run
+    noticeProgress.classList.add("pending-countdown");
+
+    timer = window.setTimeout(() => row.submit(), UNDO_MS);
+  });
+
+  undoButton.addEventListener("click", cancelPending);
+</script>

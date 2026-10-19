@@ -1,0 +1,127 @@
+---
+// Riwayat — catatan kemunculan yang sudah lewat: yang diselesaikan, yang diselesaikan
+// terlambat, dan yang tidak sempat dikerjakan. Filter status lewat GET biasa, jadi
+// halamannya tetap jalan tanpa JavaScript.
+import { CalendarRange, CircleCheck, Inbox, TriangleAlert } from "@lucide/astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireUser } from "../../lib/auth";
+import { findCategory } from "../../lib/categories";
+import { listHistory, materializeOverdue } from "../../lib/db";
+import { formatDateTime, formatPeriod } from "../../lib/format";
+
+const session = await requireUser(Astro);
+if (session instanceof Response) return session;
+
+const userId = Number(session.user!.id);
+if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequired");
+
+const filter = Astro.url.searchParams.get("status");
+const status = filter === "selesai" || filter === "terlewat" ? filter : undefined;
+// Periode yang lewat tanpa penyelesaian dicatat lebih dulu, biar riwayatnya lengkap.
+materializeOverdue(userId);
+const history = listHistory(userId, status);
+
+const tabs = [
+  { value: undefined, label: "Semua" },
+  { value: "selesai" as const, label: "Selesai" },
+  { value: "terlewat" as const, label: "Terlewat" },
+];
+
+const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
+---
+
+<DashboardLayout title="Riwayat" user={session.user}>
+  <div>
+    <h1 class="text-xl font-semibold text-slate-900">Riwayat tugas</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      Catatan kemunculan tugas {firstName} — yang selesai, yang terlambat, dan yang terlewat.
+    </p>
+  </div>
+
+  <nav class="mt-6 flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1" aria-label="Filter status">
+    {
+      tabs.map((tab) => (
+        <a
+          href={tab.value ? `/user/riwayat?status=${tab.value}` : "/user/riwayat"}
+          aria-current={status === tab.value ? "page" : undefined}
+          class:list={[
+            "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+            status === tab.value
+              ? "bg-brand-50 text-brand-700"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+          ]}
+        >
+          {tab.label}
+        </a>
+      ))
+    }
+  </nav>
+
+  {
+    history.length === 0 ? (
+      <div class="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+        <Inbox class="size-8 text-slate-300" />
+        <p class="text-sm font-medium text-slate-900">Belum ada riwayat</p>
+        <p class="max-w-sm text-sm text-slate-500">
+          Riwayat terisi begitu tugas Anda selesai atau lewat periodenya.
+        </p>
+      </div>
+    ) : (
+      <ul class="mt-4 space-y-2">
+        {history.map((row) => {
+          const category = findCategory(row.category_id);
+          const UnitIcon = category?.icon ?? Inbox;
+          return (
+            <li class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <span
+                class:list={[
+                  "grid size-9 shrink-0 place-items-center rounded-full",
+                  row.status === "terlewat"
+                    ? "bg-red-50 text-red-600"
+                    : row.late
+                      ? "bg-amber-50 text-amber-600"
+                      : "bg-emerald-50 text-emerald-600",
+                ]}
+              >
+                {row.status === "terlewat" ? (
+                  <TriangleAlert class="size-4" />
+                ) : (
+                  <CircleCheck class="size-4" />
+                )}
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-slate-900">{row.name}</p>
+                <p class="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+                  <span class="inline-flex items-center gap-1">
+                    <UnitIcon class="size-3.5" />
+                    {category?.label ?? row.category_id}
+                  </span>
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{row.periode}</span>
+                  <span class="inline-flex items-center gap-1">
+                    <CalendarRange class="size-3.5" />
+                    {formatPeriod(row.periode, row.period_key)}
+                  </span>
+                </p>
+                {row.completed_at && (
+                  <p class="mt-1 text-xs text-slate-400">Selesai {formatDateTime(row.completed_at)}</p>
+                )}
+              </div>
+              <span
+                class:list={[
+                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                  row.status === "terlewat"
+                    ? "bg-red-50 text-red-700"
+                    : row.late
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-emerald-50 text-emerald-700",
+                ]}
+              >
+                {row.status === "terlewat" ? "Terlewat" : row.late ? "Terlambat" : "Selesai"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    )
+  }
+</DashboardLayout>

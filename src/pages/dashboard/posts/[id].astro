@@ -1,0 +1,46 @@
+---
+// Post viewer — renders the stored markdown.
+import { ArrowLeft, Pencil } from "@lucide/astro";
+import { marked } from "marked";
+import Button from "../../../components/ui/Button.astro";
+import DashboardLayout from "../../../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../../../lib/auth";
+import { getPost } from "../../../lib/db";
+import { formatDateTime } from "../../../lib/format";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const id = Number(Astro.params.id);
+const post = Number.isInteger(id) ? getPost(id) : undefined;
+if (!post) return new Response("Postingan tidak ditemukan", { status: 404 });
+
+const html = marked.parse(post.body, { async: false, gfm: true, breaks: true }) as string;
+---
+
+<DashboardLayout title={post.title} user={session.user}>
+  <a
+    href="/dashboard/posts"
+    class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900"
+  >
+    <ArrowLeft class="size-4" />
+    Semua postingan
+  </a>
+
+  <article class="mt-4 rounded-xl border border-slate-200 bg-white px-6 py-8 sm:px-10">
+    <h1 class="text-2xl font-semibold leading-snug tracking-tight text-slate-900 sm:text-3xl">{post.title}</h1>
+    <p class="mt-2 text-sm text-slate-500">
+      {post.author_name} · {formatDateTime(post.created_at)}
+      {post.updated_at !== post.created_at && ` · diedit ${formatDateTime(post.updated_at)}`}
+    </p>
+
+    <hr class="my-8 border-slate-200" />
+
+    <div class="prose-md" set:html={html} />
+  </article>
+
+  <div class="mt-6 flex items-center gap-3">
+    <Button variant="outline" href={`/dashboard/posts/${post.id}/edit`}><Pencil class="size-4" />Edit</Button>
+    <Button variant="ghost" href="/dashboard/posts"><ArrowLeft class="size-4" />Kembali</Button>
+  </div>
+</DashboardLayout>

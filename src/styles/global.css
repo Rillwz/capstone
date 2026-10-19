@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Brand — indigo scale */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --color-brand-950: #1e1b4b;
+}
+
+/* Base */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+}
+
+/* Native <dialog> enter/exit, shared by every overlay in the app. Esc, focus trap and
+   the top layer come from the browser; --dialog-shift is the off state. Geometry and
+   inner layout live on each dialog's own class list. */
+.app-dialog,
+.menu-dialog {
+  --dialog-shift: translateY(0.5rem) scale(0.98);
+  opacity: 0;
+  transform: var(--dialog-shift);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    overlay 0.22s allow-discrete,
+    display 0.22s allow-discrete;
+}
+
+.app-dialog[open],
+.menu-dialog[open] {
+  opacity: 1;
+  transform: none;
+}
+
+@starting-style {
+  .app-dialog[open],
+  .menu-dialog[open] {
+    opacity: 0;
+    transform: var(--dialog-shift);
+  }
+}
+
+.app-dialog::backdrop,
+.menu-dialog::backdrop {
+  background-color: rgb(2 6 23 / 0);
+  backdrop-filter: blur(0);
+  transition:
+    background-color 0.22s ease,
+    backdrop-filter 0.22s ease,
+    overlay 0.22s allow-discrete,
+    display 0.22s allow-discrete;
+}
+
+.app-dialog[open]::backdrop,
+.menu-dialog[open]::backdrop {
+  background-color: rgb(2 6 23 / 0.55);
+  backdrop-filter: blur(3px);
+}
+
+@starting-style {
+  .app-dialog[open]::backdrop,
+  .menu-dialog[open]::backdrop {
+    background-color: rgb(2 6 23 / 0);
+    backdrop-filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog,
+  .menu-dialog,
+  .app-dialog::backdrop,
+  .menu-dialog::backdrop {
+    transition: none;
+  }
+}
+
+/* Centred card — announcement reader, delete confirmation. */
+.app-dialog {
+  @apply m-auto rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl;
+}
+
+/* Floating sidebar menu (tablet + mobile): slides in from the left, inset from the
+   viewport edges so it reads as a panel floating over the page. The UA clamps modal
+   dialogs with max-width/-height, so both are reset before sizing. */
+.menu-dialog {
+  @apply rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl;
+  --dialog-shift: translateX(calc(-100% - 1rem));
+  margin: 0.75rem 0 0.75rem 0.75rem;
+  width: min(19rem, calc(100vw - 1.5rem));
+  height: calc(100dvh - 1.5rem);
+  max-width: none;
+  max-height: none;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Countdown bar on the pending-delete notice (users.astro). The JS timer is what
+   decides; this is only the visual, so reduced motion just freezes it. */
+@keyframes pending-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.pending-countdown {
+  transform-origin: left;
+  animation: pending-countdown 15s linear forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-countdown {
+    animation: none;
+  }
+}
+
+/* Flash notice ("Aktivitas tersimpan.") that leaves on its own: the page's JS adds
+   .is-leaving after a few seconds, then removes the node. The space collapses in the
+   same transition so the table below does not jump. Reduced motion just skips ahead. */
+.notice {
+  overflow: hidden;
+  max-height: 8rem;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s ease,
+    filter 0.35s ease,
+    max-height 0.35s ease,
+    margin-top 0.35s ease,
+    padding-block 0.35s ease;
+}
+
+.notice.is-leaving {
+  opacity: 0;
+  transform: translateY(-6px);
+  filter: blur(4px);
+  max-height: 0;
+  margin-top: 0;
+  padding-block: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice {
+    transition: none;
+  }
+}
+
+/* Rendered markdown (post viewer + editor preview). :where() keeps specificity flat. */
+.prose-md {
+  @apply text-[0.95rem] leading-relaxed text-slate-700;
+
+  :where(h1, h2, h3, h4) {
+    @apply mt-8 mb-3 font-semibold leading-snug text-slate-900 first:mt-0;
+  }
+  :where(h1) {
+    @apply text-2xl;
+  }
+  :where(h2) {
+    @apply text-xl;
+  }
+  :where(h3) {
+    @apply text-lg;
+  }
+  :where(p, ul, ol, blockquote, pre, table) {
+    @apply my-4 first:mt-0 last:mb-0;
+  }
+  :where(ul, ol) {
+    @apply space-y-1.5 pl-6;
+  }
+  :where(ul) {
+    @apply list-disc;
+  }
+  :where(ol) {
+    @apply list-decimal;
+  }
+  :where(a) {
+    @apply font-medium text-brand-600 underline underline-offset-2 hover:text-brand-700;
+  }
+  :where(strong) {
+    @apply font-semibold text-slate-900;
+  }
+  :where(code) {
+    @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.85em] text-slate-800;
+  }
+  :where(pre) {
+    @apply overflow-x-auto rounded-xl bg-slate-900 p-4 text-slate-100;
+
+    :where(code) {
+      @apply bg-transparent p-0 text-inherit;
+    }
+  }
+  :where(blockquote) {
+    @apply border-l-4 border-slate-200 pl-4 text-slate-600 italic;
+  }
+  :where(hr) {
+    @apply my-8 border-slate-200;
+  }
+  :where(table) {
+    @apply w-full border-collapse text-left;
+  }
+  :where(th, td) {
+    @apply border-b border-slate-200 px-3 py-2;
+  }
+  :where(th) {
+    @apply font-semibold text-slate-900;
+  }
+  :where(img) {
+    @apply max-w-full rounded-xl;
+  }
+}

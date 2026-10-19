@@ -1,0 +1,171 @@
+---
+// Announcement list + reader modal (login page). Two tones so the same component
+// works on the dark brand panel and on the light mobile layout.
+import { ChevronRight, X } from "@lucide/astro";
+import { formatDateTime } from "../lib/format";
+
+interface Props {
+  posts: Array<{ id: number; title: string; author_name: string; created_at: string; updated_at: string }>;
+  /** Unique per instance — a page must not repeat element ids. */
+  idPrefix: string;
+  tone?: "dark" | "light";
+  class?: string;
+}
+
+const { posts, idPrefix, tone = "light", class: className } = Astro.props;
+
+const dialogId = `post-dialog-${idPrefix}`;
+const headingId = `post-heading-${idPrefix}`;
+
+const postMeta = (post: Props["posts"][number]) =>
+  `${post.author_name} · ${formatDateTime(post.created_at)}${post.updated_at !== post.created_at ? " · diperbarui" : ""}`;
+
+const tones = {
+  dark: {
+    heading: "text-brand-300",
+    item: "text-white hover:bg-white/10 focus-visible:outline-white",
+    meta: "text-brand-300",
+    chevron: "text-brand-300 group-hover:text-white",
+  },
+  light: {
+    heading: "text-slate-400",
+    item: "text-slate-900 hover:bg-slate-100 focus-visible:outline-brand-600",
+    meta: "text-slate-500",
+    chevron: "text-slate-300 group-hover:text-brand-600",
+  },
+}[tone];
+---
+
+<section class:list={[className]} aria-labelledby={headingId}>
+  <h2 id={headingId} class:list={["text-xs font-medium tracking-wider uppercase", tones.heading]}>
+    Pengumuman terbaru
+  </h2>
+
+  <!-- p-1.5 gives the focus outline room inside the scroll container; -mx cancels the layout shift. -->
+  <ul class="mt-2 -mx-1.5 max-h-64 space-y-0.5 overflow-y-auto overscroll-contain p-1.5">
+    {
+      posts.map((post) => (
+        <li>
+          <button
+            type="button"
+            data-post-open={post.id}
+            data-post-dialog={dialogId}
+            data-post-title={post.title}
+            data-post-meta={postMeta(post)}
+            class:list={[
+              "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2",
+              tones.item,
+            ]}
+          >
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-medium">{post.title}</span>
+              <span class:list={["mt-0.5 block text-xs", tones.meta]}>{postMeta(post)}</span>
+            </span>
+            <ChevronRight
+              class={[
+                "size-4 shrink-0 transition-transform group-hover:translate-x-0.5",
+                tones.chevron,
+              ].join(" ")}
+            />
+          </button>
+        </li>
+      ))
+    }
+  </ul>
+</section>
+
+<dialog
+  id={dialogId}
+  class="app-dialog max-h-[min(85dvh,46rem)] w-[calc(100vw-2rem)] max-w-2xl open:flex open:flex-col"
+  aria-labelledby={`${dialogId}-title`}
+>
+  <div class="flex items-start gap-4 border-b border-slate-200 px-5 py-4 sm:px-6 sm:py-5">
+    <div class="min-w-0 flex-1">
+      <h2 id={`${dialogId}-title`} data-post-title class="text-lg font-semibold tracking-tight text-slate-900" />
+      <p data-post-meta class="mt-1 text-xs text-slate-500" />
+    </div>
+    <button
+      type="button"
+      data-post-close
+      aria-label="Tutup"
+      class="-mr-1 shrink-0 rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+    >
+      <X class="size-5" />
+    </button>
+  </div>
+
+  <div class="min-h-32 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+    <p data-post-status class="text-sm text-slate-500" role="status" aria-live="polite">Memuat…</p>
+    <div data-post-body class="prose-md hidden" />
+  </div>
+</dialog>
+
+<script>
+  // One script for both instances: the trigger names the dialog it opens.
+  // shortcut: markdown bodies come from admin-authored posts and are not sanitized.
+  const cache = new Map<number, string>();
+
+  const render = async (dialog: HTMLDialogElement, id: number) => {
+    const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
+    const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
+
+    const cached = cache.get(id);
+    if (cached) {
+      body.innerHTML = cached;
+      body.classList.remove("hidden");
+      status.classList.add("hidden");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/posts/${id}`, { headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error(String(response.status));
+      const { html } = (await response.json()) as { html: string };
+
+      cache.set(id, html);
+      body.innerHTML = html;
+      body.classList.remove("hidden");
+      status.classList.add("hidden");
+    } catch {
+      status.textContent = "Gagal memuat pengumuman. Coba lagi.";
+      status.classList.remove("hidden");
+    }
+  };
+
+  const open = (dialog: HTMLDialogElement, id: number, title: string, meta: string) => {
+    const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
+    const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
+    dialog.querySelector<HTMLElement>("[data-post-title]")!.textContent = title;
+    dialog.querySelector<HTMLElement>("[data-post-meta]")!.textContent = meta;
+    body.innerHTML = "";
+    body.classList.add("hidden");
+    status.textContent = "Memuat…";
+    status.classList.remove("hidden");
+
+    dialog.showModal();
+    // A modal <dialog> blocks interaction but not page scrolling.
+    document.documentElement.style.overflow = "hidden";
+    void render(dialog, id);
+  };
+
+  document.querySelectorAll<HTMLDialogElement>("dialog.app-dialog").forEach((dialog) => {
+    dialog.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+    });
+    // Click on the backdrop (the dialog element itself) closes.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.querySelectorAll<HTMLButtonElement>("[data-post-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-post-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dialog = document.getElementById(button.dataset.postDialog!) as HTMLDialogElement | null;
+      if (!dialog) return;
+      open(dialog, Number(button.dataset.postOpen), button.dataset.postTitle ?? "", button.dataset.postMeta ?? "");
+    });
+  });
+</script>

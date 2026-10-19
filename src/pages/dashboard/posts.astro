@@ -1,0 +1,287 @@
+---
+// Post list — moved off /dashboard, which is now the overview. Deletes arrive as an
+// inline POST (works without JS). Search (?q) and pagination (?page) are plain GETs,
+// so they never interfere with the POST actions below. Reordering is a JS-only
+// POST to this same URL with action=reorder.
+import { GripVertical, Newspaper, Pencil, Search, SquarePen, Trash } from "@lucide/astro";
+import Button from "../../components/ui/Button.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../../lib/auth";
+import { countPosts, deletePost, listPostsPage, reorderPosts } from "../../lib/db";
+import { formatDateTime } from "../../lib/format";
+
+const PAGE_SIZE = 10;
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = form.get("action");
+
+  if (action === "delete") {
+    const id = Number(form.get("id"));
+    if (Number.isInteger(id)) deletePost(id);
+    // Keep the current search/page after deleting.
+    return Astro.redirect(`${Astro.url.pathname}${Astro.url.search}`);
+  }
+
+  if (action === "reorder") {
+    const ids = String(form.get("ids") ?? "")
+      .split(",")
+      .map(Number)
+      .filter((id) => Number.isInteger(id) && id > 0);
+    const offset = Math.max(0, Number(form.get("offset")) || 0);
+    reorderPosts(ids, offset);
+    return new Response(null, { status: 204 });
+  }
+
+  return Astro.redirect("/dashboard/posts");
+}
+
+const q = (Astro.url.searchParams.get("q") ?? "").trim().slice(0, 100);
+const requestedPage = Number(Astro.url.searchParams.get("page") ?? "1");
+const total = countPosts(q);
+const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+const page = Number.isInteger(requestedPage) ? Math.min(Math.max(requestedPage, 1), pageCount) : 1;
+const posts = listPostsPage(q, PAGE_SIZE, (page - 1) * PAGE_SIZE);
+
+const pageHref = (target: number) =>
+  `/dashboard/posts?${new URLSearchParams({ ...(q ? { q } : {}), page: String(target) })}`;
+
+// Manual order is global, so dragging is only offered on the unfiltered list.
+const sortable = !q;
+const pageLinks =
+  pageCount <= 7
+    ? Array.from({ length: pageCount }, (_, i) => i + 1)
+    : [...new Set([1, pageCount, page - 1, page, page + 1])]
+        .filter((n) => n >= 1 && n <= pageCount)
+        .sort((a, b) => a - b);
+---
+
+<DashboardLayout title="Postingan" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Postingan</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        {total} postingan{q && " ditemukan"} · tulis, urutkan, dan kelola pengumuman untuk pengguna.
+      </p>
+    </div>
+    <Button href="/dashboard/posts/new"><SquarePen class="size-4" />Tulis postingan</Button>
+  </div>
+
+  <form method="GET" role="search" class="mt-6 flex flex-wrap items-center gap-2">
+    <div class="relative min-w-0 flex-1 sm:max-w-sm">
+      <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+      <label for="field-search" class="sr-only">Cari postingan</label>
+      <input
+        id="field-search"
+        name="q"
+        type="search"
+        value={q}
+        placeholder="Cari judul postingan…"
+        class="h-10 w-full rounded-lg border border-slate-300 bg-white pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+      />
+    </div>
+    <Button variant="outline" size="md" type="submit">Cari</Button>
+    {q && <a href="/dashboard/posts" class="text-sm font-medium text-slate-500 hover:text-slate-900">Hapus filter</a>}
+  </form>
+
+  {
+    posts.length === 0 ? (
+      <div class="mt-6 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+        <Newspaper class="mx-auto size-8 text-slate-300" />
+        <p class="mt-3 text-sm text-slate-500">
+          {q ? (
+            <>
+              Tidak ada postingan yang cocok dengan “{q}”.{" "}
+              <a href="/dashboard/posts" class="font-medium text-brand-600 hover:text-brand-700">
+                Tampilkan semua
+              </a>
+              .
+            </>
+          ) : (
+            <>
+              Belum ada postingan.{" "}
+              <a href="/dashboard/posts/new" class="font-medium text-brand-600 hover:text-brand-700">
+                Tulis postingan pertama
+              </a>
+              .
+            </>
+          )}
+        </p>
+      </div>
+    ) : (
+      <>
+        <p id="reorder-status" class="mt-6 text-xs text-slate-500" role="status">
+          {sortable ? (
+            <>
+              Tarik ikon <GripVertical class="inline size-3.5 align-[-2px]" /> atau tekan panah atas/bawah
+              untuk mengubah urutan.
+            </>
+          ) : (
+            "Hapus pencarian untuk mengubah urutan postingan."
+          )}
+        </p>
+        <ul
+          data-sortable={sortable ? "" : undefined}
+          data-offset={(page - 1) * PAGE_SIZE}
+          aria-label="Daftar postingan"
+          class="mt-2 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white"
+        >
+          {posts.map((post) => (
+            <li data-id={post.id} class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4">
+              {sortable && (
+                <button
+                  type="button"
+                  data-drag-handle
+                  draggable="true"
+                  aria-label={`Ubah urutan ${post.title} — gunakan panah atas/bawah`}
+                  class="cursor-grab rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-brand-600 active:cursor-grabbing"
+                >
+                  <GripVertical class="size-4" />
+                </button>
+              )}
+              <div class="min-w-0 flex-1">
+                <a
+                  href={`/dashboard/posts/${post.id}`}
+                  class="font-medium text-slate-900 underline-offset-2 hover:text-brand-700 hover:underline"
+                >
+                  {post.title}
+                </a>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  {post.author_name} · {formatDateTime(post.created_at)}
+                  {post.updated_at !== post.created_at && " · diedit"}
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <Button variant="outline" size="sm" href={`/dashboard/posts/${post.id}/edit`}>
+                  <Pencil class="size-4" />
+                  Edit
+                </Button>
+                <form
+                  method="POST"
+                  onsubmit="return confirm('Hapus postingan ini? Tindakan ini tidak bisa dibatalkan.')"
+                >
+                  <input type="hidden" name="action" value="delete" />
+                  <input type="hidden" name="id" value={post.id} />
+                  <Button variant="danger" size="sm" type="submit">
+                    <Trash class="size-4" />
+                    Hapus
+                  </Button>
+                </form>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {
+          pageCount > 1 && (
+            <nav class="mt-4 flex flex-wrap items-center justify-between gap-3" aria-label="Halaman postingan">
+              <p class="text-sm text-slate-500">
+                Halaman {page} dari {pageCount}
+              </p>
+              <div class="flex flex-wrap items-center gap-1">
+                {page > 1 ? (
+                  <Button variant="outline" size="sm" href={pageHref(page - 1)}>Sebelumnya</Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled>Sebelumnya</Button>
+                )}
+                {pageLinks.map((n, i) => (
+                  <>
+                    {i > 0 && n - pageLinks[i - 1] > 1 && <span class="px-1 text-slate-400">…</span>}
+                    <a
+                      href={pageHref(n)}
+                      aria-current={n === page ? "page" : undefined}
+                      class:list={[
+                        "inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-sm font-medium",
+                        n === page
+                          ? "bg-brand-600 text-white"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                      ]}
+                    >
+                      {n}
+                    </a>
+                  </>
+                ))}
+                {page < pageCount ? (
+                  <Button variant="outline" size="sm" href={pageHref(page + 1)}>Berikutnya</Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled>Berikutnya</Button>
+                )}
+              </div>
+            </nav>
+          )
+        }
+      </>
+    )
+  }
+
+  <script>
+    const list = document.querySelector<HTMLElement>("[data-sortable]");
+    const status = document.getElementById("reorder-status");
+    const hint = status?.innerHTML ?? "";
+
+    if (list) {
+      const rows = () => [...list.querySelectorAll<HTMLElement>("[data-id]")];
+      const save = async () => {
+        const body = new FormData();
+        body.set("action", "reorder");
+        body.set("ids", rows().map((row) => row.dataset.id).join(","));
+        body.set("offset", list.dataset.offset ?? "0");
+        if (status) status.textContent = "Menyimpan urutan…";
+        const res = await fetch(location.href, { method: "POST", body }).catch(() => null);
+        if (status) status.innerHTML = res?.ok ? "Urutan tersimpan." : hint;
+        if (!res?.ok) location.reload();
+      };
+
+      let dragged: HTMLElement | null = null;
+      let startOrder = "";
+      const order = () => rows().map((row) => row.dataset.id).join(",");
+
+      list.addEventListener("dragstart", (event) => {
+        const handle = (event.target as HTMLElement).closest("[data-drag-handle]");
+        dragged = handle?.closest<HTMLElement>("[data-id]") ?? null;
+        if (!dragged) return;
+        startOrder = order();
+        dragged.classList.add("opacity-50");
+        event.dataTransfer?.setData("text/plain", dragged.dataset.id ?? "");
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      });
+
+      // Save on dragend, not drop: Chrome abandons the drop when dragover moves the
+      // dragged row, which left the new order unsaved.
+      list.addEventListener("dragend", () => {
+        dragged?.classList.remove("opacity-50");
+        dragged = null;
+        if (order() !== startOrder) void save();
+      });
+
+      list.addEventListener("dragover", (event) => {
+        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
+        if (!dragged || !target || target === dragged) return;
+        event.preventDefault();
+        const rect = target.getBoundingClientRect();
+        target.parentElement?.insertBefore(
+          dragged,
+          event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target,
+        );
+      });
+
+      list.addEventListener("drop", (event) => event.preventDefault());
+
+      // Keyboard alternative to dragging: focus the handle, press ↑ / ↓.
+      list.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        const row = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
+        if (!row) return;
+        event.preventDefault();
+        const sibling = event.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+        if (!sibling) return;
+        list.insertBefore(row, event.key === "ArrowUp" ? sibling : sibling.nextSibling);
+        row.querySelector<HTMLElement>("[data-drag-handle]")?.focus();
+        void save();
+      });
+    }
+  </script>
+</DashboardLayout>
