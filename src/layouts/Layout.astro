@@ -15,6 +15,25 @@ const { title } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <title>{title} · Better Belt</title>
+    <script is:inline>
+      // Set the theme before the first paint, otherwise the page flashes the wrong
+      // palette. An explicit choice wins; without one the system preference decides.
+      (() => {
+        let stored = null;
+        try {
+          stored = localStorage.getItem("assignment-theme");
+        } catch {
+          stored = null; // storage blocked — fall back to the system preference
+        }
+        const theme =
+          stored === "light" || stored === "dark" || stored === "paper"
+            ? stored
+            : matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <slot />

@@ -7,8 +7,8 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "ASTRO_VITE_CACHE=node_modules/.vite-build astro build",
-    "check": "ASTRO_VITE_CACHE=node_modules/.vite-check astro check",
+    "build": "astro build",
+    "check": "astro check",
     "preview": "astro preview",
     "astro": "astro"
   },

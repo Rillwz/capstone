@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the manual theme (data-theme), not the OS setting — the
+   user picks the theme, the OS only decides the default. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
@@ -15,7 +19,132 @@
   --color-brand-800: #3730a3;
   --color-brand-900: #312e81;
   --color-brand-950: #1e1b4b;
+
+  /* Text/icon colour sitting ON a brand surface (primary button, active avatar). It
+     flips in dark mode, where brand-600 becomes a light indigo. */
+  --color-onbrand: #ffffff;
+  /* Text/icon colour on the always-dark surfaces (login panel, delete notice). */
+  --color-oninverse: #ffffff;
+  /* The always-dark notice panel. */
+  --color-inverse: #0f172a;
 }
+
+/* ---------------------------------------------------------------------------
+   Themes. Every colour utility in Tailwind compiles to var(--color-*), so a theme
+   is nothing more than remapping those variables under a scope on <html>. No
+   component changes when a theme is applied — that is what keeps the switch from
+   breaking anything.
+   --------------------------------------------------------------------------- */
+
+/* Dark — the neutral scale inverts: slate-50 was the page, now it is the deepest
+   surface, and slate-900 becomes the lightest text. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-slate-50: #020617;
+  --color-slate-100: #1e293b;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #475569;
+  --color-slate-400: #64748b;
+  --color-slate-500: #94a3b8;
+  --color-slate-600: #cbd5e1;
+  --color-slate-700: #e2e8f0;
+  --color-slate-800: #f1f5f9;
+  --color-slate-900: #f8fafc;
+  --color-white: #0f172a;
+
+  --color-brand-50: #1e1b4b;
+  --color-brand-100: #312e81;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #818cf8;
+  --color-brand-700: #a5b4fc;
+  --color-brand-800: #c7d2fe;
+  --color-brand-900: #e0e7ff;
+  --color-brand-950: #0b1020;
+
+  --color-onbrand: #0b1120;
+  --color-oninverse: #ffffff;
+  --color-inverse: #1e293b;
+
+  --color-emerald-50: #052e16;
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #6ee7b7;
+  --color-red-50: #450a0a;
+  --color-red-600: #dc2626;
+  --color-red-700: #fca5a5;
+  --color-red-200: #7f1d1d;
+  --color-red-400: #f87171;
+  --color-amber-50: #451a03;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+}
+
+/* Paper — warm cream surfaces, ochre accents and a paper grain over the whole page. */
+html[data-theme="paper"] {
+  color-scheme: light;
+
+  --color-slate-50: #faf3e0;
+  --color-slate-100: #f5ead2;
+  --color-slate-200: #e8dcc0;
+  --color-slate-300: #d6c69f;
+  --color-slate-400: #a89a72;
+  --color-slate-500: #8a7c58;
+  --color-slate-600: #6b5f42;
+  --color-slate-700: #4f4630;
+  --color-slate-800: #3f3726;
+  --color-slate-900: #2f2919;
+  --color-white: #fffdf5;
+
+  --color-brand-50: #fef3c7;
+  --color-brand-100: #fde68a;
+  --color-brand-200: #fcd34d;
+  --color-brand-300: #fbbf24;
+  --color-brand-400: #f59e0b;
+  --color-brand-500: #d97706;
+  --color-brand-600: #b45309;
+  --color-brand-700: #92400e;
+  --color-brand-800: #78350f;
+  --color-brand-900: #5b2e0b;
+  --color-brand-950: #3b2410;
+
+  --color-onbrand: #ffffff;
+  --color-oninverse: #ffffff;
+  --color-inverse: #3b2410;
+}
+
+/* The grain: one fixed overlay above the page, below the native dialog layer. */
+html[data-theme="paper"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.7'/%3E%3C/svg%3E");
+}
+
+/* Code blocks keep their own dark surface in every theme. */
+html[data-theme="dark"] .prose-md pre {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+/* The trigger shows the icon of the theme in effect. */
+[data-theme-icon] {
+  display: none;
+}
+
+html[data-theme="dark"] [data-theme-icon="dark"],
+html[data-theme="paper"] [data-theme-icon="paper"],
+html[data-theme="light"] [data-theme-icon="light"],
+html:not([data-theme]) [data-theme-icon="light"] {
+  display: block;
+}
+
 
 /* Base */
 @layer base {

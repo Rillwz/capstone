@@ -4,6 +4,7 @@ import LoginForm from "../components/LoginForm.astro";
 import PostList from "../components/PostList.astro";
 import RotatingText from "../components/RotatingText.astro";
 import BrandLogo from "../components/BrandLogo.astro";
+import ThemeToggle from "../components/ui/ThemeToggle.astro";
 import { listPosts } from "../lib/db";
 
 // Announcements are readable from the login screen, so this list is public.
@@ -11,9 +12,13 @@ const posts = listPosts(5);
 ---
 
 <Layout title="Masuk">
+  <div class="fixed right-4 top-4 z-20">
+    <ThemeToggle />
+  </div>
+
   <main class="flex min-h-dvh">
     <!-- Left: brand panel (hidden on mobile) -->
-    <section class="hidden lg:flex lg:w-[45%] xl:w-1/2 flex-col justify-between bg-brand-950 p-12 text-white">
+    <section class="hidden lg:flex lg:w-[45%] xl:w-1/2 flex-col justify-between bg-brand-950 p-12 text-oninverse">
       <a href="/" class="flex items-center gap-2.5 text-lg font-semibold">
         <BrandLogo name="Assignment" />
       </a>

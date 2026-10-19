@@ -1,0 +1,115 @@
+---
+// Theme switcher — Terang / Gelap / Kertas. The pick is stored in localStorage and
+// applied as data-theme on <html>; global.css turns that into a palette swap.
+import { FileText, Moon, Sun } from "@lucide/astro";
+import type { AstroComponent } from "@lucide/astro";
+import Button from "./Button.astro";
+
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+
+// The swatch shows the palette the theme will bring — literal colours, because the
+// theme tokens follow the theme that is active right now.
+const options: Array<{
+  value: string;
+  label: string;
+  icon: AstroComponent;
+  swatch: string[];
+}> = [
+  { value: "light", label: "Terang", icon: Sun, swatch: ["bg-[#f8fafc]", "bg-white", "bg-[#4f46e5]"] },
+  { value: "dark", label: "Gelap", icon: Moon, swatch: ["bg-[#020617]", "bg-[#0f172a]", "bg-[#818cf8]"] },
+  { value: "paper", label: "Kertas", icon: FileText, swatch: ["bg-[#faf3e0]", "bg-[#fffdf5]", "bg-[#b45309]"] },
+];
+---
+
+<button
+  type="button"
+  data-theme-open
+  aria-haspopup="dialog"
+  aria-label="Ganti tema tampilan"
+  title="Ganti tema tampilan"
+  class:list={[
+    "grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+    className,
+  ]}
+>
+  <Sun data-theme-icon="light" class="size-4" />
+  <Moon data-theme-icon="dark" class="size-4" />
+  <FileText data-theme-icon="paper" class="size-4" />
+</button>
+
+<dialog data-theme-dialog class="app-dialog w-[calc(100vw-2rem)] max-w-sm" aria-labelledby="theme-title">
+  <div class="p-5">
+    <h2 id="theme-title" class="text-base font-semibold text-slate-900">Tema tampilan</h2>
+    <p class="mt-0.5 text-xs text-slate-500">Pilihan ini tersimpan di peramban ini.</p>
+
+    <div class="mt-4 grid gap-2">
+      {
+        options.map(({ value, label, icon: Icon, swatch }) => (
+          <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 transition-colors hover:bg-slate-50 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50">
+            <input
+              type="radio"
+              name="theme"
+              value={value}
+              class="size-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+            />
+            <span class="flex shrink-0 overflow-hidden rounded-md border border-slate-200">
+              {swatch.map((color) => (
+                <span class:list={["h-6 w-4", color]} />
+              ))}
+            </span>
+            <span class="flex-1 text-sm font-medium text-slate-700">{label}</span>
+            <Icon class="size-4 shrink-0 text-slate-400" />
+          </label>
+        ))
+      }
+    </div>
+
+    <div class="mt-5 flex justify-end">
+      <Button variant="outline" size="sm" type="button" data-dialog-close>
+        Tutup
+      </Button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  import { applyTheme, currentTheme, watchSystemTheme } from "../../scripts/theme.ts";
+  import type { Theme } from "../../scripts/theme.ts";
+
+  const dialog = document.querySelector<HTMLDialogElement>("[data-theme-dialog]");
+  const trigger = document.querySelector<HTMLElement>("[data-theme-open]");
+
+  trigger?.addEventListener("click", () => {
+    if (!dialog) return;
+    // Tick the theme that is in effect.
+    dialog.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((input) => {
+      input.checked = input.value === currentTheme();
+    });
+    dialog.showModal();
+    document.documentElement.style.overflow = "hidden";
+  });
+
+  dialog?.addEventListener("close", () => {
+    document.documentElement.style.overflow = "";
+  });
+
+  // Backdrop click closes; clicks inside the panel do not.
+  dialog?.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  dialog?.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+    button.addEventListener("click", () => dialog.close());
+  });
+
+  dialog?.addEventListener("change", (event) => {
+    const input = event.target as HTMLInputElement;
+    if (input.name === "theme" && input.checked) applyTheme(input.value as Theme);
+  });
+
+  watchSystemTheme();
+</script>
