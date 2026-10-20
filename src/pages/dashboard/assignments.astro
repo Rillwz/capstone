@@ -274,7 +274,7 @@ const cleared = Astro.url.searchParams.has("cleared");
                   title={canAssign ? undefined : "Semua aktivitas sudah ditugaskan ke pengguna ini"}
                 >
                   <Plus class="size-4" />
-                  Tambah penugasan
+                  Tambah
                 </Button>
               </div>
             </header>
@@ -334,7 +334,7 @@ const cleared = Astro.url.searchParams.has("cleared");
                             <button
                               type="submit"
                               aria-label={`Lepas ${activity.name}`}
-                              class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-brand-600"
+                              class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
                             >
                               <X class="size-3.5" />
                               Lepas
@@ -366,7 +366,7 @@ const cleared = Astro.url.searchParams.has("cleared");
 
       <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
         <div>
-          <h2 id="assign-title" class="text-base font-semibold text-slate-900">Tambah penugasan</h2>
+          <h2 id="assign-title" class="text-base font-semibold text-slate-900">Tambah Penugasan</h2>
           <p class="mt-0.5 text-xs text-slate-500">
             {selected?.name} — pilih unit kerja, lalu centang jenis aktivitasnya.
           </p>
@@ -451,7 +451,7 @@ const cleared = Astro.url.searchParams.has("cleared");
           <Button variant="outline" type="button" data-dialog-close>Batal</Button>
           <Button type="submit" disabled={!canAssign}>
             <ClipboardCheck class="size-4" />
-            Simpan penugasan
+            Simpan
           </Button>
         </div>
       </div>

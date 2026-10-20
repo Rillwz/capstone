@@ -1,7 +1,7 @@
 ---
-// Theme switcher — Terang / Gelap / Kertas. The pick is stored in localStorage and
+// Theme switcher — Terang / Gelap / Hangat. The pick is stored in localStorage and
 // applied as data-theme on <html>; global.css turns that into a palette swap.
-import { FileText, Moon, Sun } from "@lucide/astro";
+import { Layers, Moon, Sun } from "@lucide/astro";
 import type { AstroComponent } from "@lucide/astro";
 import Button from "./Button.astro";
 
@@ -21,7 +21,7 @@ const options: Array<{
 }> = [
   { value: "light", label: "Terang", icon: Sun, swatch: ["bg-[#f8fafc]", "bg-white", "bg-[#4f46e5]"] },
   { value: "dark", label: "Gelap", icon: Moon, swatch: ["bg-[#020617]", "bg-[#0f172a]", "bg-[#818cf8]"] },
-  { value: "paper", label: "Kertas", icon: FileText, swatch: ["bg-[#faf3e0]", "bg-[#fffdf5]", "bg-[#b45309]"] },
+  { value: "paper", label: "Hangat", icon: Layers, swatch: ["bg-[#faf3e0]", "bg-[#fffdf5]", "bg-[#b45309]"] },
 ];
 ---
 
@@ -38,7 +38,7 @@ const options: Array<{
 >
   <Sun data-theme-icon="light" class="size-4" />
   <Moon data-theme-icon="dark" class="size-4" />
-  <FileText data-theme-icon="paper" class="size-4" />
+  <Layers data-theme-icon="paper" class="size-4" />
 </button>
 
 <dialog data-theme-dialog class="app-dialog w-[calc(100vw-2rem)] max-w-sm" aria-labelledby="theme-title">
