@@ -1,9 +1,10 @@
 ---
-// Edit post — same editor, updates in place.
+// Edit post — same editor, updates in place. The save goes through an Astro Action
+// (src/actions), so the page is not reloaded.
 import PostEditor from "../../../../components/admin/PostEditor.astro";
 import DashboardLayout from "../../../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../../../lib/auth";
-import { getPost, updatePost } from "../../../../lib/db";
+import { getPost } from "../../../../lib/db";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
@@ -11,28 +12,18 @@ if (session instanceof Response) return session;
 const id = Number(Astro.params.id);
 const post = Number.isInteger(id) ? getPost(id) : undefined;
 if (!post) return new Response("Postingan tidak ditemukan", { status: 404 });
-
-let error: string | undefined;
-let title = post.title;
-let body = post.body;
-
-if (Astro.request.method === "POST") {
-  const form = await Astro.request.formData();
-  title = String(form.get("title") ?? "").trim();
-  body = String(form.get("body") ?? "").trim();
-
-  if (!title || !body) {
-    error = "Judul dan isi wajib diisi.";
-  } else {
-    updatePost(post.id, title, body);
-    return Astro.redirect(`/dashboard/posts/${post.id}`);
-  }
-}
 ---
 
 <DashboardLayout title={`Edit — ${post.title}`} user={session.user}>
-  <h1 class="text-xl font-semibold text-slate-900">Edit postingan</h1>
-  <p class="mt-1 mb-6 text-sm text-slate-500">Perubahan langsung tersimpan setelah disimpan.</p>
+  <div data-reveal="up">
+    <h1 class="text-xl font-semibold text-slate-900">Edit postingan</h1>
+    <p class="mt-1 mb-6 text-sm text-slate-500">Perubahan langsung tersimpan setelah disimpan.</p>
+  </div>
 
-  <PostEditor post={{ title, body }} error={error} submitLabel="Simpan perubahan" />
+  <PostEditor
+    post={{ title: post.title, body: post.body }}
+    postId={post.id}
+    action="update"
+    submitLabel="Simpan perubahan"
+  />
 </DashboardLayout>

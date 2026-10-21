@@ -1,0 +1,259 @@
+---
+// Grafik kontribusi satu tahun — seperti heatmap GitHub: satu kolom = satu minggu,
+// satu baris = satu hari (Sen–Min). Kotak hijau = tugas yang selesai (makin banyak
+// makin pekat), cincin merah = kemunculan yang terlewat.
+//
+// Year history: hersipyear, jadi user bisa membuka tahun-tahun sebelumnya.
+import { addDays, daysInMonth } from "../../lib/tasks";
+import { formatDate } from "../../lib/format";
+
+interface Props {
+  /** Tahun yang ditampilkan. */
+  year: number;
+  /** "YYYY-MM-DD" hari ini — hari berikutnya digambar redup. */
+  today: string;
+  /** Rekap harian: "YYYY-MM-DD" -> { selesai, terlewat }. */
+  days: Map<string, { done: number; missed: number }>;
+  /** Tahun yang punya data, untuk pemilih tahun. */
+  years: number[];
+}
+
+const { year, today, days, years } = Astro.props;
+
+const WEEKDAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+const LEVELS = [0, 1, 2, 3, 4];
+
+const totalDays = Math.round((Date.UTC(year + 1, 0, 0) - Date.UTC(year, 0, 1)) / 86400000);
+// 0 = Senin, jadi kolom pertama memuat hari-hari sebelum 1 Januari.
+const firstWeekday = (new Date(Date.UTC(year, 0, 1)).getUTCDay() + 6) % 7;
+const weeks = Math.ceil((firstWeekday + totalDays) / 7);
+
+// Sel grid, urutan kolom-per-kolom (sesuai grid-auto-flow: column).
+const cells: Array<{
+  date: string;
+  level: number;
+  missed: number;
+  future: boolean;
+} | null> = [];
+for (let week = 0; week < weeks; week++) {
+  for (let weekday = 0; weekday < 7; weekday++) {
+    const index = week * 7 + weekday - firstWeekday;
+    if (index < 0 || index >= totalDays) {
+      cells.push(null);
+      continue;
+    }
+    const date = addDays(`${year}-01-01`, index);
+    const bucket = days.get(date) ?? { done: 0, missed: 0 };
+    cells.push({
+      date,
+      level: Math.min(bucket.done, LEVELS.length - 1),
+      missed: bucket.missed,
+      future: date > today,
+    });
+  }
+}
+
+// Label bulan: di kolom minggu pertama bulannya, dan dilewati kalau ruangnya
+// terlalu sempit — sama seperti grafik GitHub.
+const monthLabels: Array<{ label: string; column: number; span: number }> = [];
+let dayBefore = 0;
+for (let month = 0; month < 12; month++) {
+  const column = Math.floor((dayBefore + firstWeekday) / 7) + 1;
+  dayBefore += daysInMonth(year, month + 1);
+  const next = month === 11 ? weeks + 1 : Math.floor((dayBefore + firstWeekday) / 7) + 1;
+  const span = next - column;
+  if (span >= 2) monthLabels.push({ label: MONTHS[month], column, span });
+}
+
+// Ringkasan tahun terpilih.
+let doneTotal = 0;
+let missedTotal = 0;
+let activeDays = 0;
+for (const [date, bucket] of days) {
+  if (!date.startsWith(String(year))) continue;
+  doneTotal += bucket.done;
+  missedTotal += bucket.missed;
+  if (bucket.done + bucket.missed > 0) activeDays++;
+}
+
+const yearOptions = [...new Set([year, ...years, new Date().getFullYear()])].sort((a, b) => b - a);
+
+const cellTitle = (date: string, done: number, missed: number) => {
+  const parts = [formatDate(date)];
+  if (done > 0) parts.push(`${done} selesai`);
+  if (missed > 0) parts.push(`${missed} terlewat`);
+  if (done === 0 && missed === 0) parts.push("tidak ada aktivitas");
+  return parts.join(" · ");
+};
+---
+
+<section
+  class="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+  data-reveal="up"
+  aria-labelledby="graph-title"
+>
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 id="graph-title" class="text-sm font-semibold text-slate-900">Aktivitas {year}</h2>
+      <p class="mt-0.5 text-xs text-slate-500">
+        {doneTotal} selesai · {missedTotal} terlewat · {activeDays} hari dengan aktivitas
+      </p>
+    </div>
+
+    <form method="GET" action="/user" class="flex items-center gap-2">
+      <label for="graph-year" class="text-xs font-medium text-slate-500">Tahun</label>
+      <select
+        id="graph-year"
+        name="tahun"
+        data-graph-year
+        class="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+      >
+        {yearOptions.map((option) => <option value={option} selected={option === year}>{option}</option>)}
+      </select>
+      <button
+        type="submit"
+        class="h-9 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+      >
+        Lihat
+      </button>
+    </form>
+  </div>
+
+  <div class="mt-4 overflow-x-auto pb-1" data-graph-scroll>
+    <div class="min-w-max" style="--cell: 12px; --gap: 3px">
+      <div
+        class="ml-10 grid"
+        style={`grid-template-columns: repeat(${weeks}, var(--cell)); gap: var(--gap)`}
+        aria-hidden="true"
+      >
+        {
+          monthLabels.map(({ label, column, span }) => (
+            <span class="text-[10px] leading-none text-slate-400" style={`grid-column: ${column} / span ${span}`}>
+              {label}
+            </span>
+          ))
+        }
+      </div>
+
+      <div class="mt-1 flex items-start gap-2">
+        <div
+          class="grid w-8 shrink-0"
+          style={`grid-template-rows: repeat(7, var(--cell)); row-gap: var(--gap)`}
+          aria-hidden="true"
+        >
+          {
+            WEEKDAYS.map((label, index) => (
+              <span class="text-[10px] leading-none text-slate-400">{index % 2 === 0 ? label : ""}</span>
+            ))
+          }
+        </div>
+
+        <div
+          class="grid"
+          style={`grid-template-rows: repeat(7, var(--cell)); grid-auto-columns: var(--cell); grid-auto-flow: column; gap: var(--gap)`}
+          role="img"
+          aria-label={`Grafik aktivitas ${year}: ${doneTotal} tugas selesai, ${missedTotal} terlewat, ${activeDays} hari dengan aktivitas`}
+        >
+          {
+            cells.map((cell) =>
+              cell ? (
+                <div
+                  data-graph-cell
+                  data-level={cell.level}
+                  data-missed={cell.missed > 0 ? "1" : undefined}
+                  data-future={cell.future ? "1" : undefined}
+                  title={cellTitle(cell.date, cell.level, cell.missed)}
+                />
+              ) : (
+                <div data-graph-cell aria-hidden="true" />
+              ),
+            )
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+    <span class="inline-flex items-center gap-1.5">
+      Lebih sedikit
+      {LEVELS.map((level) => (
+        <span data-graph-cell data-level={level} class="size-3 rounded-[2px]" />
+      ))}
+      Lebih banyak
+    </span>
+    <span class="inline-flex items-center gap-1.5">
+      <span data-graph-cell data-level="0" data-missed="1" class="size-3 rounded-[2px]" />
+      Terlewat
+    </span>
+  </div>
+</section>
+
+<style>
+  /* Warnanya lewat token tema, jadi grafik ikut terang | gelap | hangat tanpa
+     kode warna baru di tiap tema. */
+  [data-graph-cell] {
+    border-radius: 2px;
+    transition: transform 120ms ease;
+  }
+
+  [data-graph-cell][data-level="0"] {
+    background-color: var(--color-graph-0);
+  }
+  [data-graph-cell][data-level="1"] {
+    background-color: var(--color-graph-1);
+  }
+  [data-graph-cell][data-level="2"] {
+    background-color: var(--color-graph-2);
+  }
+  [data-graph-cell][data-level="3"] {
+    background-color: var(--color-graph-3);
+  }
+  [data-graph-cell][data-level="4"] {
+    background-color: var(--color-graph-4);
+  }
+
+  /* Cincin merah: hari yang punya kemunculan terlewat, apa pun isinya. */
+  [data-graph-cell][data-missed="1"] {
+    box-shadow: inset 0 0 0 2px var(--color-graph-missed);
+  }
+
+  /* Hari yang belum datang digambar redup — belum ada yang bisa terlewat. */
+  [data-graph-cell][data-future="1"] {
+    opacity: 0.4;
+  }
+
+  [data-graph-cell]:hover {
+    transform: scale(1.25);
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-graph-cell] {
+      transition: none;
+    }
+    [data-graph-cell]:hover {
+      transform: none;
+    }
+  }
+</style>
+
+<script>
+  import { navigate } from "astro:transitions/client";
+
+  // Pemilih tahun memakai router, jadi halamannya dirender ulang tanpa muat ulang
+  // penuh. Tanpa JavaScript, form GET-nya tetap bekerja.
+  const init = () => {
+    const select = document.querySelector<HTMLSelectElement>("[data-graph-year]");
+    if (!select || select.dataset.wired) return;
+    select.dataset.wired = "1";
+
+    select.addEventListener("change", () => {
+      void navigate(`/user?tahun=${select.value}`);
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

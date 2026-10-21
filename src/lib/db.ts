@@ -52,7 +52,7 @@ db.exec(`
     utama INTEGER NOT NULL DEFAULT 0 CHECK (utama IN (0, 1)),
     periodik INTEGER NOT NULL DEFAULT 0 CHECK (periodik IN (0, 1)),
     bukan_tupoksi INTEGER NOT NULL DEFAULT 0 CHECK (bukan_tupoksi IN (0, 1)),
-    periode TEXT NOT NULL CHECK (periode IN ('Harian', 'Mingguan', 'Bulanan', 'Semesteran')),
+    periode TEXT NOT NULL CHECK (periode IN ('Harian', 'Mingguan', 'Bulanan', 'Triwulan', 'Semesteran', 'Tahunan', 'Kegiatan')),
     frequency INTEGER NOT NULL DEFAULT 0,
     minutes INTEGER NOT NULL,
     sdm INTEGER NOT NULL,
@@ -87,6 +87,21 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs (user_id, period_key);
+
+  -- Catatan & tautan per kemunculan. Berdiri sendiri dari activity_logs, jadi catatan
+  -- tetap ada saat tanda selesai dibatalkan, dan bisa ditulis sebelum tugas selesai.
+  CREATE TABLE IF NOT EXISTS occurrence_notes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+    period_key TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    link TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, activity_id, period_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_occurrence_notes_user ON occurrence_notes (user_id);
 `);
 
 // Migration: "classification" (pick one) became three independent flags.
@@ -120,6 +135,40 @@ if (!postColumns.some((column) => column.name === "position")) {
          OR (p2.created_at = posts.created_at AND p2.id > posts.id)
     );
   `);
+}
+
+// Migration: the period vocabulary grew (Triwulan, Tahunan, Kegiatan — kosakata MPP).
+// The CHECK constraint lives inside the table definition, so a stale table is rebuilt.
+// Foreign keys are switched off while rebuilding, so the assignments, logs and notes
+// that point at an activity survive the swap.
+const activitiesSchema = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'activities'")
+  .get() as { sql: string } | undefined;
+if (activitiesSchema && !activitiesSchema.sql.includes("'Triwulan'")) {
+  db.pragma("foreign_keys = OFF");
+  db.exec(`
+    CREATE TABLE activities_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      date TEXT NOT NULL,
+      utama INTEGER NOT NULL DEFAULT 0 CHECK (utama IN (0, 1)),
+      periodik INTEGER NOT NULL DEFAULT 0 CHECK (periodik IN (0, 1)),
+      bukan_tupoksi INTEGER NOT NULL DEFAULT 0 CHECK (bukan_tupoksi IN (0, 1)),
+      periode TEXT NOT NULL CHECK (periode IN ('Harian', 'Mingguan', 'Bulanan', 'Triwulan', 'Semesteran', 'Tahunan', 'Kegiatan')),
+      frequency INTEGER NOT NULL DEFAULT 0,
+      minutes INTEGER NOT NULL,
+      sdm INTEGER NOT NULL,
+      volume INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO activities_new (id, category_id, name, date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at)
+      SELECT id, category_id, name, date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at FROM activities;
+    DROP TABLE activities;
+    ALTER TABLE activities_new RENAME TO activities;
+    CREATE INDEX IF NOT EXISTS idx_activities_category ON activities (category_id, id);
+  `);
+  db.pragma("foreign_keys = ON");
 }
 
 export interface UserRow {
@@ -290,6 +339,7 @@ export function deleteUser(id: number): void {
   db.transaction(() => {
     db.prepare("DELETE FROM login_logs WHERE user_id = ?").run(id);
     db.prepare("DELETE FROM posts WHERE author_id = ?").run(id);
+    db.prepare("DELETE FROM occurrence_notes WHERE user_id = ?").run(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
   })();
 }
@@ -411,7 +461,10 @@ export function updateActivity(id: number, categoryId: string, input: ActivityIn
 
 /** Scoped by category so a tampered id can't delete another unit's row. */
 export function deleteActivity(id: number, categoryId: string): void {
-  db.prepare("DELETE FROM activities WHERE id = ? AND category_id = ?").run(id, categoryId);
+  db.transaction(() => {
+    db.prepare("DELETE FROM occurrence_notes WHERE activity_id = ?").run(id);
+    db.prepare("DELETE FROM activities WHERE id = ? AND category_id = ?").run(id, categoryId);
+  })();
 }
 
 // ---------------------------------------------------------------------------
@@ -488,12 +541,18 @@ export function createAssignments(userId: number, activityIds: number[]): number
 
 /** Un-assign one activity from a user. */
 export function deleteAssignmentActivity(userId: number, activityId: number): void {
-  db.prepare("DELETE FROM assignments WHERE user_id = ? AND activity_id = ?").run(userId, activityId);
+  db.transaction(() => {
+    db.prepare("DELETE FROM occurrence_notes WHERE user_id = ? AND activity_id = ?").run(userId, activityId);
+    db.prepare("DELETE FROM assignments WHERE user_id = ? AND activity_id = ?").run(userId, activityId);
+  })();
 }
 
 /** Un-assign everything a user carries, across all units. */
 export function deleteAssignment(userId: number): void {
-  db.prepare("DELETE FROM assignments WHERE user_id = ?").run(userId);
+  db.transaction(() => {
+    db.prepare("DELETE FROM occurrence_notes WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM assignments WHERE user_id = ?").run(userId);
+  })();
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +589,9 @@ export interface UserOccurrence {
   completed_at: string | null;
   /** Selesai setelah hari jatuh tempo — tetap tercatat, tapi ditandai terlambat. */
   late: boolean;
+  /** Catatan & tautan yang menempel pada kemunculan ini. */
+  note: string;
+  link: string;
 }
 
 /** Kemunculan yang terlewat dari satu aktivitas, digabung jadi satu baris. */
@@ -542,6 +604,8 @@ export interface MissedTask {
   /** Periode terlewat yang paling akhir. */
   last_key: string;
   last_due: string;
+  /** Semua periode yang terlewat, terbaru dulu — satu per kemunculan. */
+  periods: string[];
 }
 
 export interface HistoryRow {
@@ -556,6 +620,9 @@ export interface HistoryRow {
   status: "selesai" | "terlewat";
   completed_at: string | null;
   late: boolean;
+  /** Catatan & tautan yang menempel pada kemunculan ini. */
+  note: string;
+  link: string;
 }
 
 /**
@@ -616,6 +683,7 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
     completed_at: string | null;
   }>;
   const index = new Map(logs.map((log) => [`${log.activity_id}|${log.period_key}`, log]));
+  const notes = listOccurrenceNotes(userId);
 
   return rows.map((row) => {
     const period = currentPeriod(row.periode, today);
@@ -623,6 +691,7 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
     const log = index.get(`${row.activity_id}|${period.key}`);
     const done = log?.status === "selesai";
     const completedAt = done ? log.completed_at : null;
+    const note = notes.get(`${row.activity_id}|${period.key}`);
     return {
       ...row,
       period_key: period.key,
@@ -632,15 +701,61 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
       status: done ? "selesai" : "open",
       completed_at: completedAt,
       late: completedAt ? dbDateToIso(completedAt) > due : false,
+      note: note?.note ?? "",
+      link: note?.link ?? "",
     };
   });
+}
+
+/** Catatan & tautan satu kemunculan (kosong kalau belum ada). */
+export interface OccurrenceNote {
+  note: string;
+  link: string;
+}
+
+const noteKey = (activityId: number, periodKey: string) => `${activityId}|${periodKey}`;
+
+/** Semua catatan satu user, dikunci kemunculan (activity + periode). */
+export function listOccurrenceNotes(userId: number): Map<string, OccurrenceNote> {
+  const rows = db
+    .prepare("SELECT activity_id, period_key, note, link FROM occurrence_notes WHERE user_id = ?")
+    .all(userId) as Array<{ activity_id: number; period_key: string; note: string; link: string }>;
+  return new Map(rows.map((row) => [noteKey(row.activity_id, row.period_key), { note: row.note, link: row.link }]));
+}
+
+/**
+ * Simpan catatan & tautan satu kemunculan. Keduanya kosong berarti catatan dihapus —
+ * fungsi mengembalikan true kalau catatan memang dihapus.
+ */
+export function setOccurrenceNote(
+  userId: number,
+  activityId: number,
+  periodKey: string,
+  note: string,
+  link: string,
+): boolean {
+  if (!note && !link) {
+    const info = db
+      .prepare("DELETE FROM occurrence_notes WHERE user_id = ? AND activity_id = ? AND period_key = ?")
+      .run(userId, activityId, periodKey);
+    return info.changes > 0;
+  }
+
+  db.prepare(
+    `INSERT INTO occurrence_notes (user_id, activity_id, period_key, note, link)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, activity_id, period_key)
+     DO UPDATE SET note = excluded.note, link = excluded.link, updated_at = datetime('now')`,
+  ).run(userId, activityId, periodKey, note, link);
+  return false;
 }
 
 /** Aktivitas yang punya kemunculan terlewat, digabung per aktivitas. */
 export function listMissedTasks(userId: number): MissedTask[] {
   const rows = db
     .prepare(
-      `SELECT l.activity_id, ac.name, ac.category_id, ac.periode, count(*) AS c, max(l.period_key) AS last_key
+      `SELECT l.activity_id, ac.name, ac.category_id, ac.periode, count(*) AS c, max(l.period_key) AS last_key,
+              group_concat(l.period_key) AS keys
        FROM activity_logs l
        JOIN activities ac ON ac.id = l.activity_id
        JOIN assignments g ON g.activity_id = l.activity_id AND g.user_id = l.user_id
@@ -654,6 +769,7 @@ export function listMissedTasks(userId: number): MissedTask[] {
     periode: Periode;
     c: number;
     last_key: string;
+    keys: string;
   }>;
 
   return rows
@@ -665,6 +781,8 @@ export function listMissedTasks(userId: number): MissedTask[] {
       count: row.c,
       last_key: row.last_key,
       last_due: periodFromKey(row.periode, row.last_key).end,
+      // Periodes satu aktivitas satu jenis, jadi urut lexicografik sama dengan urut waktu.
+      periods: row.keys.split(",").sort().reverse(),
     }))
     .sort((a, b) => b.last_due.localeCompare(a.last_due));
 }
@@ -708,18 +826,85 @@ export function completeOccurrence(
   return late ? "terlambat" : "selesai";
 }
 
-/** Batalkan tanda selesai — kemunculan yang periodenya sudah lewat akan tercatat lagi. */
-export function undoOccurrence(userId: number, activityId: number, periodKey: string): boolean {
+/**
+ * Batalkan tanda selesai. Mengembalikan ke mana kemunculannya kembali:
+ * "terlewat" kalau periodenya sudah lewat (periode itu dicatat terlewat lagi),
+ * "open" kalau periodenya masih berjalan (tugasnya terbuka lagi).
+ */
+export function undoOccurrence(
+  userId: number,
+  activityId: number,
+  periodKey: string,
+): "terlewat" | "open" | false {
   const info = db
     .prepare(
       `DELETE FROM activity_logs
        WHERE user_id = ? AND activity_id = ? AND period_key = ? AND status = 'selesai'`,
     )
     .run(userId, activityId, periodKey);
-  return info.changes > 0;
+  if (info.changes === 0) return false;
+
+  const activity = db
+    .prepare(
+      `SELECT ac.periode, ac.date FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+       WHERE g.user_id = ? AND g.activity_id = ?`,
+    )
+    .get(userId, activityId) as { periode: Periode; date: string } | undefined;
+  if (!activity) return "open";
+
+  const due = dueDate(activity.periode, periodFromKey(activity.periode, periodKey), activity.date);
+  return due < todayIso() ? "terlewat" : "open";
 }
 
 /** Riwayat log user, terbaru dulu. */
+/**
+ * Rekap harian kemunculan user — dasar grafik kontribusi.
+ *
+ * Tugas yang selesai dihitung pada hari penyelesaikannya (seperti commit), tugas
+ * terlewat pada hari jatuh temponya — bukan pada hari aplikasi pertama kali
+ * mengetahuinya, karena itu akan menumpuk semua kemunculan lama di hari ini.
+ */
+export function listDailyActivity(userId: number): {
+  days: Map<string, { done: number; missed: number }>;
+  years: number[];
+} {
+  const rows = db
+    .prepare(
+      `SELECT l.status, l.completed_at, l.period_key, ac.periode, ac.date
+       FROM activity_logs l JOIN activities ac ON ac.id = l.activity_id
+       WHERE l.user_id = ?`,
+    )
+    .all(userId) as Array<{
+    status: "selesai" | "terlewat";
+    completed_at: string | null;
+    period_key: string;
+    periode: Periode;
+    date: string;
+  }>;
+
+  const days = new Map<string, { done: number; missed: number }>();
+  const bump = (date: string, key: "done" | "missed") => {
+    const bucket = days.get(date) ?? { done: 0, missed: 0 };
+    bucket[key] += 1;
+    days.set(date, bucket);
+  };
+
+  for (const row of rows) {
+    if (row.status === "selesai") {
+      if (!row.completed_at) continue;
+      bump(dbDateToIso(row.completed_at), "done");
+      continue;
+    }
+    const period = periodFromKey(row.periode, row.period_key);
+    bump(dueDate(row.periode, period, row.date), "missed");
+  }
+
+  const years = [...new Set([...days.keys()].map((date) => Number(date.slice(0, 4))))].sort(
+    (a, b) => b - a,
+  );
+  return { days, years };
+}
+
 export function listHistory(userId: number, status?: "selesai" | "terlewat"): HistoryRow[] {
   const rows = db
     .prepare(
@@ -741,10 +926,13 @@ export function listHistory(userId: number, status?: "selesai" | "terlewat"): Hi
     date: string;
   }>;
 
+  const notes = listOccurrenceNotes(userId);
+
   return rows
     .map((row) => {
       const period = periodFromKey(row.periode, row.period_key);
       const due = dueDate(row.periode, period, row.date);
+      const note = notes.get(noteKey(row.activity_id, row.period_key));
       return {
         id: row.id,
         activity_id: row.activity_id,
@@ -757,6 +945,8 @@ export function listHistory(userId: number, status?: "selesai" | "terlewat"): Hi
         status: row.status,
         completed_at: row.completed_at,
         late: row.status === "selesai" && row.completed_at ? dbDateToIso(row.completed_at) > due : false,
+        note: note?.note ?? "",
+        link: note?.link ?? "",
       };
     })
     .sort((a, b) => b.period_end.localeCompare(a.period_end) || b.id - a.id);
@@ -773,6 +963,28 @@ export function countCompletedBetween(userId: number, fromIso: string, toIso: st
     const day = dbDateToIso(row.completed_at);
     return day >= fromIso && day <= toIso;
   }).length;
+}
+
+/** Tiga penghitung di dashboard user — dikirim balik oleh action agar DOM-nya sinkron. */
+export interface TaskStats {
+  /** "Selesai hari ini" sebagai "2/3". */
+  doneToday: string;
+  /** Kemunculan yang terlewat. */
+  missed: number;
+  /** Tugas yang selesai bulan ini. */
+  doneMonth: number;
+}
+
+export function taskStats(userId: number): TaskStats {
+  const today = todayIso();
+  const todayItems = listUserOccurrences(userId).filter((item) => item.due === today);
+  const doneToday = todayItems.filter((item) => item.status === "selesai").length;
+
+  return {
+    doneToday: `${doneToday}/${todayItems.length}`,
+    missed: listMissedTasks(userId).reduce((sum, item) => sum + item.count, 0),
+    doneMonth: countCompletedBetween(userId, `${today.slice(0, 7)}-01`, today),
+  };
 }
 
 export { db };

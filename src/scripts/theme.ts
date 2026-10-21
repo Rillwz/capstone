@@ -41,3 +41,8 @@ export function watchSystemTheme() {
     document.documentElement.dataset.theme = media.matches ? "dark" : "light";
   });
 }
+
+/** The theme to use right now: the stored choice, else the system preference. */
+export function preferredTheme(): Theme {
+  return storedTheme() ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}

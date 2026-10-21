@@ -3,15 +3,15 @@
 // the right, grouped by unit kerja. "Tambah penugasan" opens one dialog holding the whole
 // activity catalog (all units); the unit dropdown only filters panels client-side, so
 // there is no reload between picking a user, a unit and the activities.
+//
+// Aksinya memakai Astro Action (src/actions) — assigning, melepas, dan mengosongkan
+// penugasan tidak memuat ulang halaman.
 import { ClipboardCheck, ClipboardX, Plus, Search, Trash, TriangleAlert, UserRound, X } from "@lucide/astro";
 import Button from "../../components/ui/Button.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
 import { categories } from "../../lib/categories";
 import {
-  createAssignments,
-  deleteAssignment,
-  deleteAssignmentActivity,
   listActivityCatalog,
   listAssignedActivitiesForUser,
   listAssignmentUsers,
@@ -24,37 +24,7 @@ if (session instanceof Response) return session;
 const members = listUsers().filter((user) => user.role !== 0);
 const counts = new Map(listAssignmentUsers().map((row) => [row.id, row]));
 
-let error: string | undefined;
 let selectedId = Number(Astro.url.searchParams.get("user")) || 0;
-
-if (Astro.request.method === "POST") {
-  const form = await Astro.request.formData();
-  const action = String(form.get("action"));
-  const userId = Number(form.get("userId"));
-  selectedId = userId;
-  const member = members.find((user) => user.id === userId);
-
-  if (!member) {
-    error = "Pengguna tidak valid.";
-  } else if (action === "create") {
-    const activityIds = [...form.getAll("activityIds").values()]
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value));
-    if (activityIds.length === 0) {
-      error = "Pilih minimal satu jenis aktivitas.";
-    } else {
-      const added = createAssignments(userId, activityIds);
-      return Astro.redirect(`/dashboard/assignments?user=${userId}&saved=${added}`);
-    }
-  } else if (action === "remove-activity") {
-    const activityId = Number(form.get("activityId"));
-    if (Number.isInteger(activityId)) deleteAssignmentActivity(userId, activityId);
-    return Astro.redirect(`/dashboard/assignments?user=${userId}&removed=1`);
-  } else if (action === "remove-all") {
-    deleteAssignment(userId);
-    return Astro.redirect(`/dashboard/assignments?user=${userId}&cleared=1`);
-  }
-}
 
 if (!members.some((user) => user.id === selectedId)) selectedId = members[0]?.id ?? 0;
 const selected = members.find((user) => user.id === selectedId);
@@ -77,10 +47,6 @@ const unitsWithActivities = categories.filter((category) =>
 );
 // Nothing left to hand out: every activity already belongs to this user.
 const canAssign = catalog.some((activity) => !activity.assigned);
-
-const saved = Number(Astro.url.searchParams.get("saved")) || 0;
-const removed = Astro.url.searchParams.has("removed");
-const cleared = Astro.url.searchParams.has("cleared");
 ---
 
 <DashboardLayout title="Penugasan" user={session.user}>
@@ -91,46 +57,9 @@ const cleared = Astro.url.searchParams.has("cleared");
     </p>
   </div>
 
-  {
-    saved > 0 && (
-      <p
-        data-notice
-        data-notice-params="saved"
-        class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-        role="status"
-      >
-        {saved === 1 ? "Aktivitas ditugaskan." : `${saved} aktivitas ditugaskan.`}
-      </p>
-    )
-  }
-  {
-    removed && (
-      <p
-        data-notice
-        data-notice-params="removed"
-        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
-        role="status"
-      >
-        Aktivitas dilepas dari penugasan.
-      </p>
-    )
-  }
-  {
-    cleared && (
-      <p
-        data-notice
-        data-notice-params="cleared"
-        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
-        role="status"
-      >
-        Semua penugasan pengguna ini dihapus.
-      </p>
-    )
-  }
-
   <div class="mt-6 grid items-start gap-6 lg:grid-cols-[19rem_1fr]">
     <!-- Left: the people you can assign to -->
-    <section class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <section class="overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
       <header class="border-b border-slate-200 px-4 py-3">
         <div class="flex items-baseline justify-between gap-2">
           <h2 class="text-sm font-semibold text-slate-900">Pengguna</h2>
@@ -175,7 +104,7 @@ const cleared = Astro.url.searchParams.has("cleared");
             const row = counts.get(member.id);
             const active = member.id === selectedId;
             return (
-              <li data-user-item data-search={`${member.name} ${member.email}`.toLowerCase()}>
+              <li data-user-item data-reveal="fade" data-search={`${member.name} ${member.email}`.toLowerCase()}>
                 <a
                   href={`/dashboard/assignments?user=${member.id}`}
                   aria-current={active ? "true" : undefined}
@@ -239,7 +168,7 @@ const cleared = Astro.url.searchParams.has("cleared");
     </section>
 
     <!-- Right: what this person carries -->
-    <section class="min-w-0">
+    <section class="min-w-0" data-reveal="up">
       {
         !selected ? (
           <div class="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
@@ -312,7 +241,7 @@ const cleared = Astro.url.searchParams.has("cleared");
             ) : (
               <div class="divide-y divide-slate-200">
                 {byUnit.map(({ category, activities }) => (
-                  <div class="px-5 py-4">
+                  <div class="px-5 py-4" data-reveal="up">
                     <div class="flex items-center gap-2">
                       <category.icon class="size-4 text-slate-400" />
                       <h3 class="text-sm font-semibold text-slate-900">{category.label}</h3>
@@ -322,24 +251,22 @@ const cleared = Astro.url.searchParams.has("cleared");
                     </div>
                     <ul class="mt-2 divide-y divide-slate-100">
                       {activities.map((activity) => (
-                        <li class="flex items-center gap-3 py-2">
+                        <li class="flex items-center gap-3 py-2" data-reveal="fade">
                           <span class="min-w-0 flex-1 text-sm text-slate-800">{activity.name}</span>
                           <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
                             {activity.periode}
                           </span>
-                          <form method="POST" class="shrink-0">
-                            <input type="hidden" name="action" value="remove-activity" />
-                            <input type="hidden" name="userId" value={selected.id} />
-                            <input type="hidden" name="activityId" value={activity.id} />
-                            <button
-                              type="submit"
-                              aria-label={`Lepas ${activity.name}`}
-                              class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
-                            >
-                              <X class="size-3.5" />
-                              Lepas
-                            </button>
-                          </form>
+                          <button
+                            type="button"
+                            data-remove-activity
+                            data-user-id={selected.id}
+                            data-activity-id={activity.id}
+                            aria-label={`Lepas ${activity.name}`}
+                            class="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+                          >
+                            <X class="size-3.5" />
+                            Lepas
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -354,16 +281,9 @@ const cleared = Astro.url.searchParams.has("cleared");
   </div>
 
   <!-- Assignment dialog: the whole catalog, filtered by the unit dropdown (no reloads). -->
-  <dialog
-    id="assign-dialog"
-    class="app-dialog w-[calc(100vw-2rem)] max-w-2xl"
-    aria-labelledby="assign-title"
-    data-reopen={error ? "true" : undefined}
-  >
-    <form method="POST" data-assign-form>
-      <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="userId" value={selected?.id ?? 0} />
-
+  <dialog id="assign-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-2xl" aria-labelledby="assign-title">
+    {/* Formulir ini cuma wadah field-nya — submit-nya ditangani Astro Action. */}
+    <form method="POST" data-assign-form data-user-id={selected?.id ?? 0}>
       <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
         <div>
           <h2 id="assign-title" class="text-base font-semibold text-slate-900">Tambah Penugasan</h2>
@@ -382,13 +302,8 @@ const cleared = Astro.url.searchParams.has("cleared");
       </div>
 
       <div class="px-5 pt-4 sm:px-6">
-        {
-          error && (
-            <p class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
-              {error}
-            </p>
-          )
-        }
+        <p data-assign-error hidden class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+        </p>
         <label for="unit-picker" class="mb-1.5 block text-sm font-medium text-slate-700">Unit kerja</label>
         <select
           id="unit-picker"
@@ -459,9 +374,8 @@ const cleared = Astro.url.searchParams.has("cleared");
   </dialog>
 
   <dialog id="clear-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-md" aria-labelledby="clear-title">
-    <form method="POST">
-      <input type="hidden" name="action" value="remove-all" />
-      <input type="hidden" name="userId" value={selected?.id ?? 0} />
+    {/* Wadah field — submit-nyahandled oleh Astro Action. */}
+    <form method="POST" data-clear-form data-user-id={selected?.id ?? 0}>
       <div class="p-5 sm:p-6">
         <div class="flex items-start gap-3">
           <span class="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">
@@ -491,153 +405,242 @@ const cleared = Astro.url.searchParams.has("cleared");
 </DashboardLayout>
 
 <script>
-  import "../../scripts/notices.ts";
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
 
-  const assignDialog = document.getElementById("assign-dialog") as HTMLDialogElement | null;
-  const clearDialog = document.getElementById("clear-dialog") as HTMLDialogElement | null;
+  // The router swaps the DOM but keeps this module, so the dialogs are wired again on
+  // every astro:page-load.
+  const init = () => {
+    // The body is replaced on every navigation, so this marker is per page.
+    if (document.body.dataset.assignWired) return;
+    document.body.dataset.assignWired = "1";
 
-  const open = (dialog: HTMLDialogElement | null) => {
-    if (!dialog) return;
-    dialog.showModal();
-    document.documentElement.style.overflow = "hidden";
+    const assignDialog = document.getElementById("assign-dialog") as HTMLDialogElement | null;
+    const clearDialog = document.getElementById("clear-dialog") as HTMLDialogElement | null;
+
+    const open = (dialog: HTMLDialogElement | null) => {
+      if (!dialog) return;
+      dialog.showModal();
+      document.documentElement.style.overflow = "hidden";
+    };
+
+    [assignDialog, clearDialog].forEach((dialog) => {
+      if (!dialog || dialog.dataset.assignWired) return;
+      dialog.dataset.assignWired = "1";
+
+      dialog.addEventListener("close", () => {
+        document.documentElement.style.overflow = "";
+      });
+      // Backdrop click closes; clicks inside the panel do not.
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+        button.addEventListener("click", () => dialog.close());
+      });
+    });
+
+    document.querySelector("[data-assign-open]")?.addEventListener("click", () => open(assignDialog));
+    document.querySelector("[data-clear-open]")?.addEventListener("click", () => open(clearDialog));
+
+    // Unit dropdown filters the catalog panels; the submit hint follows the selections.
+    const form = document.querySelector<HTMLFormElement>("[data-assign-form]");
+    const picker = document.querySelector<HTMLSelectElement>("[data-unit-picker]");
+    const hint = document.querySelector<HTMLElement>("[data-dialog-hint]");
+    const assignError = document.querySelector<HTMLElement>("[data-assign-error]");
+
+    const syncPanels = () => {
+      const unit = picker?.value;
+      document.querySelectorAll<HTMLElement>("[data-unit-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.unitPanel !== unit;
+      });
+      if (!form || !hint) return;
+      const checked = form.querySelectorAll<HTMLInputElement>('input[name="activityIds"]:checked').length;
+      hint.textContent = checked === 0 ? "Belum ada aktivitas dipilih." : `${checked} aktivitas dipilih.`;
+    };
+
+    picker?.addEventListener("change", syncPanels);
+    form?.addEventListener("change", syncPanels);
+    syncPanels();
+
+    // Tambah penugasan — Astro Action, jadi halamannya tidak dimuat ulang.
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const activityIds = [...form.querySelectorAll<HTMLInputElement>('input[name="activityIds"]:checked')].map(
+        (box) => Number(box.value),
+      );
+      if (activityIds.length === 0) {
+        if (assignError) {
+          assignError.textContent = "Pilih minimal satu jenis aktivitas.";
+          assignError.hidden = false;
+        }
+        return;
+      }
+      if (assignError) assignError.hidden = true;
+
+      const { data, error } = await actions.assignActivities({
+        userId: Number(form.dataset.userId ?? 0),
+        activityIds,
+      });
+      if (error) {
+        if (assignError) {
+          assignError.textContent = error.message ?? "Penugasan gagal disimpan.";
+          assignError.hidden = false;
+        }
+        return;
+      }
+
+      assignDialog?.close();
+      await refreshPage();
+      toast(
+        data?.added === 1 ? "Aktivitas ditugaskan." : `${data?.added ?? 0} aktivitas ditugaskan.`,
+      );
+    });
+
+    // Hapus semua penugasan user ini.
+    const clearForm = document.querySelector<HTMLFormElement>("[data-clear-form]");
+    clearForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const { error } = await actions.clearAssignments({ userId: Number(clearForm.dataset.userId ?? 0) });
+      if (error) {
+        toast(error.message ?? "Penugasan gagal dihapus.", "error");
+        return;
+      }
+      clearDialog?.close();
+      await refreshPage();
+      toast("Semua penugasan pengguna ini dihapus.");
+    });
+
+    // Lepas satu aktivitas dari user ini.
+    document.querySelectorAll<HTMLButtonElement>("[data-remove-activity]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const { error } = await actions.removeActivity({
+          userId: Number(button.dataset.userId ?? 0),
+          activityId: Number(button.dataset.activityId ?? 0),
+        });
+        button.disabled = false;
+        if (error) {
+          toast(error.message ?? "Aktivitas gagal dilepas.", "error");
+          return;
+        }
+        await refreshPage();
+        toast("Aktivitas dilepas dari penugasan.");
+      });
+    });
   };
 
-  [assignDialog, clearDialog].forEach((dialog) => {
-    if (!dialog) return;
-    dialog.addEventListener("close", () => {
-      document.documentElement.style.overflow = "";
-    });
-    // Backdrop click closes; clicks inside the panel do not.
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
-      button.addEventListener("click", () => dialog.close());
-    });
-  });
-
-  document.querySelector("[data-assign-open]")?.addEventListener("click", () => open(assignDialog));
-  document.querySelector("[data-clear-open]")?.addEventListener("click", () => open(clearDialog));
-
-  // A rejected POST re-renders the page; reopen the dialog so the error sits beside the form.
-  if (assignDialog?.dataset.reopen) open(assignDialog);
-
-  // Flash notices leave on their own: 4s to read, then the fade-out. Their URL params go
-  // with them so a refresh cannot show them twice.
-  // Unit dropdown filters the catalog panels; the submit hint follows the selections.
-  const form = document.querySelector<HTMLFormElement>("[data-assign-form]");
-  const picker = document.querySelector<HTMLSelectElement>("[data-unit-picker]");
-  const hint = document.querySelector<HTMLElement>("[data-dialog-hint]");
-
-  const syncPanels = () => {
-    const unit = picker?.value;
-    document.querySelectorAll<HTMLElement>("[data-unit-panel]").forEach((panel) => {
-      panel.hidden = panel.dataset.unitPanel !== unit;
-    });
-    if (!form || !hint) return;
-    const checked = form.querySelectorAll<HTMLInputElement>('input[name="activityIds"]:checked').length;
-    hint.textContent = checked === 0 ? "Belum ada aktivitas dipilih." : `${checked} aktivitas dipilih.`;
-  };
-
-  picker?.addEventListener("change", syncPanels);
-  form?.addEventListener("change", syncPanels);
-  syncPanels();
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>
 
 <script>
   // User search — filters the people list in place. No reload: the selected user's
   // panel on the right stays as it is, and the query never touches the URL.
-  const searchInput = document.querySelector<HTMLInputElement>("[data-user-search]");
-  const searchClear = document.querySelector<HTMLButtonElement>("[data-user-search-clear]");
-  const searchHint = document.querySelector<HTMLElement>("[data-user-search-hint]");
-  const searchCount = document.querySelector<HTMLElement>("[data-user-count]");
-  const searchEmpty = document.querySelector<HTMLElement>("[data-user-empty]");
-  const userItems = [...document.querySelectorAll<HTMLElement>("[data-user-item]")];
+  //
+  // The router swaps the DOM but keeps this module, so the search is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const searchInput = document.querySelector<HTMLInputElement>("[data-user-search]");
+    const searchClear = document.querySelector<HTMLButtonElement>("[data-user-search-clear]");
+    const searchHint = document.querySelector<HTMLElement>("[data-user-search-hint]");
+    const searchCount = document.querySelector<HTMLElement>("[data-user-count]");
+    const searchEmpty = document.querySelector<HTMLElement>("[data-user-empty]");
+    const userItems = [...document.querySelectorAll<HTMLElement>("[data-user-item]")];
+    if (!searchInput || userItems.length === 0) return;
 
-  /** Wraps the matched part of a label in <mark>. Text nodes only — a name is never
-      turned into markup. */
-  const highlight = (el: HTMLElement | null, query: string) => {
-    if (!el) return;
-    const text = el.textContent ?? "";
-    el.replaceChildren();
-    if (!query) {
-      el.textContent = text;
-      return;
-    }
-    const haystack = text.toLowerCase();
-    let cursor = 0;
-    let at = haystack.indexOf(query);
-    while (at !== -1) {
-      if (at > cursor) el.append(text.slice(cursor, at));
-      const mark = document.createElement("mark");
-      mark.textContent = text.slice(at, at + query.length);
-      mark.className = "rounded bg-brand-100 px-0.5 text-brand-900";
-      el.append(mark);
-      cursor = at + query.length;
-      at = haystack.indexOf(query, cursor);
-    }
-    el.append(text.slice(cursor));
-  };
+    /** Wraps the matched part of a label in <mark>. Text nodes only — a name is never
+        turned into markup. */
+    const highlight = (el: HTMLElement | null, query: string) => {
+      if (!el) return;
+      const text = el.textContent ?? "";
+      el.replaceChildren();
+      if (!query) {
+        el.textContent = text;
+        return;
+      }
+      const haystack = text.toLowerCase();
+      let cursor = 0;
+      let at = haystack.indexOf(query);
+      while (at !== -1) {
+        if (at > cursor) el.append(text.slice(cursor, at));
+        const mark = document.createElement("mark");
+        mark.textContent = text.slice(at, at + query.length);
+        mark.className = "rounded bg-brand-100 px-0.5 text-brand-900";
+        el.append(mark);
+        cursor = at + query.length;
+        at = haystack.indexOf(query, cursor);
+      }
+      el.append(text.slice(cursor));
+    };
 
-  const applyUserSearch = (raw: string) => {
-    const query = raw.trim().toLowerCase();
-    let visible = 0;
+    const applyUserSearch = (raw: string) => {
+      const query = raw.trim().toLowerCase();
+      let visible = 0;
 
-    for (const item of userItems) {
-      const match = !query || (item.dataset.search ?? "").includes(query);
-      item.hidden = !match;
-      // Hidden rows are reset too, so no stale highlight is left behind.
-      highlight(item.querySelector<HTMLElement>("[data-user-name]"), match ? query : "");
-      highlight(item.querySelector<HTMLElement>("[data-user-email]"), match ? query : "");
-      if (match) visible++;
-    }
+      for (const item of userItems) {
+        const match = !query || (item.dataset.search ?? "").includes(query);
+        item.hidden = !match;
+        // Hidden rows are reset too, so no stale highlight is left behind.
+        highlight(item.querySelector<HTMLElement>("[data-user-name]"), match ? query : "");
+        highlight(item.querySelector<HTMLElement>("[data-user-email]"), match ? query : "");
+        if (match) visible++;
+      }
 
-    if (searchCount) {
-      searchCount.textContent = query
-        ? `${visible} dari ${userItems.length} pengguna`
-        : `${userItems.length} pengguna`;
-    }
-    if (searchEmpty) searchEmpty.hidden = !query || visible > 0;
-    if (searchClear) searchClear.hidden = raw.length === 0;
-    if (searchHint) searchHint.hidden = raw.length > 0;
-  };
+      if (searchCount) {
+        searchCount.textContent = query
+          ? `${visible} dari ${userItems.length} pengguna`
+          : `${userItems.length} pengguna`;
+      }
+      if (searchEmpty) searchEmpty.hidden = !query || visible > 0;
+      if (searchClear) searchClear.hidden = raw.length === 0;
+      if (searchHint) searchHint.hidden = raw.length > 0;
+    };
 
-  searchInput?.addEventListener("input", () => applyUserSearch(searchInput.value));
+    searchInput.addEventListener("input", () => applyUserSearch(searchInput.value));
 
-  searchInput?.addEventListener("keydown", (event) => {
-    // Esc clears the query and keeps the caret in the field.
-    if (event.key === "Escape" && searchInput.value) {
-      event.preventDefault();
-      searchInput.value = "";
-      applyUserSearch("");
-      return;
-    }
-    // Enter jumps to the first person still on screen.
-    if (event.key === "Enter") {
-      userItems.find((item) => !item.hidden)?.querySelector<HTMLAnchorElement>("a")?.focus();
-    }
-  });
-
-  document.querySelectorAll<HTMLElement>("[data-user-search-clear], [data-user-search-reset]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!searchInput) return;
-      searchInput.value = "";
-      applyUserSearch("");
-      searchInput.focus();
+    searchInput.addEventListener("keydown", (event) => {
+      // Esc clears the query and keeps the caret in the field.
+      if (event.key === "Escape" && searchInput.value) {
+        event.preventDefault();
+        searchInput.value = "";
+        applyUserSearch("");
+        return;
+      }
+      // Enter jumps to the first person still on screen.
+      if (event.key === "Enter") {
+        userItems.find((item) => !item.hidden)?.querySelector<HTMLAnchorElement>("a")?.focus();
+      }
     });
-  });
 
-  // "/" focuses the search from anywhere on the page, unless the caret is already in a field.
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-    const target = event.target as HTMLElement | null;
-    const tag = target?.tagName;
-    if (target?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    event.preventDefault();
-    searchInput?.focus();
-  });
+    document.querySelectorAll<HTMLElement>("[data-user-search-clear], [data-user-search-reset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        searchInput.value = "";
+        applyUserSearch("");
+        searchInput.focus();
+      });
+    });
 
-  applyUserSearch("");
+    // "/" focuses the search from anywhere on the page, unless the caret is already in a field.
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (target?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      event.preventDefault();
+      searchInput.focus();
+    };
+    // The listener lives on the document, so it is attached only once.
+    if (!document.body.dataset.assignSearchWired) {
+      document.body.dataset.assignSearchWired = "1";
+      document.addEventListener("keydown", onShortcut);
+    }
+
+    applyUserSearch("");
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>
 
 <style>

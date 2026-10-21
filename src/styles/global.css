@@ -27,6 +27,15 @@
   --color-oninverse: #ffffff;
   /* The always-dark notice panel. */
   --color-inverse: #0f172a;
+
+  /* Grafik kontribusi: skala hijau (0 = kosong, 1–4 = increasingly productive) dan
+     merah untuk kemunculan yang terlewat. */
+  --color-graph-0: #e2e8f0;
+  --color-graph-1: #a7f3d0;
+  --color-graph-2: #34d399;
+  --color-graph-3: #059669;
+  --color-graph-4: #065f46;
+  --color-graph-missed: #dc2626;
 }
 
 /* ---------------------------------------------------------------------------
@@ -80,6 +89,15 @@ html[data-theme="dark"] {
   --color-amber-50: #451a03;
   --color-amber-600: #fbbf24;
   --color-amber-700: #fcd34d;
+
+  /* The green scale flips to the bright end on a dark surface, so the graph keeps
+     its contrast instead of sinking into the background. */
+  --color-graph-0: #1e293b;
+  --color-graph-1: #065f46;
+  --color-graph-2: #059669;
+  --color-graph-3: #10b981;
+  --color-graph-4: #34d399;
+  --color-graph-missed: #f87171;
 }
 
 /* Paper — warm cream surfaces, ochre accents and a paper grain over the whole page. */
@@ -113,6 +131,14 @@ html[data-theme="paper"] {
   --color-onbrand: #ffffff;
   --color-oninverse: #ffffff;
   --color-inverse: #3b2410;
+
+  /* The graph sits on cream paper, so its greens are warmed up to match. */
+  --color-graph-0: #e8dcc0;
+  --color-graph-1: #cbe0b0;
+  --color-graph-2: #93b977;
+  --color-graph-3: #5f8f4c;
+  --color-graph-4: #3f6a34;
+  --color-graph-missed: #b42318;
 }
 
 /* The grain: one fixed overlay above the page, below the native dialog layer. */
@@ -145,6 +171,30 @@ html:not([data-theme]) [data-theme-icon="light"] {
   display: block;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Router transitions. The page's own entrance (the reveal cascade in the motion
+   kit) is the transition: the root does not cross-fade, because a root snapshot
+   paints over the live DOM — the cascade would run under it and never be seen.
+   --------------------------------------------------------------------------- */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion. The dashboard reveals its blocks as they scroll in, so the state
+   before the animation has to be hidden here — otherwise the content flashes
+   in first and the animation replays over it. The rule only applies when JS is
+   on and motion is welcome: without JS, or with reduced motion, the content
+   must be there from the first paint.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  html.js [data-reveal] {
+    opacity: 0;
+  }
+}
 
 /* Base */
 @layer base {

@@ -16,6 +16,16 @@ export function formatDateTime(value: string): string {
   });
 }
 
+/** The date part of a stored datetime ("21 Okt 2026"), without the time. */
+export function formatDateOnly(value: string): string {
+  return parseDbDate(value).toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  });
+}
+
 /** Activity rows show the day only ("13"); a row saved without a date shows a dash. */
 export function formatDay(value: string): string {
   return value ? String(Number(value.slice(8, 10))) : "–";
@@ -31,6 +41,31 @@ export function formatDate(value: string): string {
   });
 }
 
+/** Versi pendek dari formatPeriod, untuk chip: "Minggu 43", "Okt 2026", "Semester 2 2026". */
+export function formatPeriodShort(periode: Periode, key: string): string {
+  switch (periode) {
+    case "Harian":
+      return formatDate(key);
+    case "Mingguan":
+      return `Minggu ${key.slice(6)}`;
+    case "Bulanan":
+    case "Kegiatan": {
+      const year = key.slice(0, 4);
+      const label = new Date(`${key}-01T00:00:00Z`).toLocaleDateString("id-ID", {
+        month: "short",
+        timeZone: "Asia/Jakarta",
+      });
+      return `${label} ${year}`;
+    }
+    case "Triwulan":
+      return `Kuartal ${key.slice(6)} ${key.slice(0, 4)}`;
+    case "Semesteran":
+      return `Semester ${key.endsWith("S1") ? 1 : 2} ${key.slice(0, 4)}`;
+    case "Tahunan":
+      return key.slice(0, 4);
+  }
+}
+
 /** A period key as a readable label: "20 Okt 2026", "Minggu 43 · 20–26 Okt 2026", … */
 export function formatPeriod(periode: Periode, key: string): string {
   switch (periode) {
@@ -41,13 +76,20 @@ export function formatPeriod(periode: Periode, key: string): string {
       return `Minggu ${key.slice(6)} · ${formatDate(start)} – ${formatDate(end)}`;
     }
     case "Bulanan":
+    case "Kegiatan":
       return new Date(`${key}-01T00:00:00Z`).toLocaleDateString("id-ID", {
         month: "long",
         year: "numeric",
         timeZone: "Asia/Jakarta",
       });
+    case "Triwulan": {
+      const { start, end } = periodFromKey(periode, key);
+      return `Kuartal ${key.slice(6)} ${key.slice(0, 4)} · ${formatDate(start)} – ${formatDate(end)}`;
+    }
     case "Semesteran":
       return `Semester ${key.endsWith("S1") ? 1 : 2} ${key.slice(0, 4)}`;
+    case "Tahunan":
+      return `Tahun ${key.slice(0, 4)}`;
   }
 }
 

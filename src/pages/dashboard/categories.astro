@@ -10,7 +10,7 @@ if (session instanceof Response) return session;
 ---
 
 <DashboardLayout title="Kategori" user={session.user}>
-  <div>
+  <div data-reveal="up">
     <h1 class="text-xl font-semibold text-slate-900">Kategori</h1>
     <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
   </div>
@@ -18,9 +18,10 @@ if (session instanceof Response) return session;
   <ul class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
     {
       categories.map(({ id, label, icon: Icon }) => (
-        <li>
+        <li data-reveal="scale">
           <a
             href={`/dashboard/categories/${id}`}
+            data-lift
             class="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-colors hover:border-brand-300 hover:bg-brand-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
           >
             <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">

@@ -1,6 +1,7 @@
 ---
 // Markdown editor with a live preview pane ("semacam WYSIWYG").
-// Posts to the current URL — the page decides create vs. update.
+// Posts to the current URL — the page decides create vs. update. The save goes
+// through an Astro Action, so publishing does not reload the page.
 import { Bold, Code, Heading2, Italic, Link, List, Quote, X } from "@lucide/astro";
 import Button from "../ui/Button.astro";
 import Input from "../ui/Input.astro";
@@ -9,9 +10,13 @@ interface Props {
   post?: { title: string; body: string };
   error?: string;
   submitLabel?: string;
+  /** Id postingan yang disunting — kosong untuk membuat yang baru. */
+  postId?: number;
+  /** Ke mana formulir dikirim: halaman baru atau suntingan. */
+  action?: "create" | "update";
 }
 
-const { post, error, submitLabel = "Simpan" } = Astro.props;
+const { post, error, submitLabel = "Simpan", postId, action = "create" } = Astro.props;
 
 const tools = [
   { md: "bold", icon: Bold, label: "Tebal" },
@@ -30,7 +35,15 @@ const tools = [
   </p>
 )}
 
-<form method="POST" class="space-y-4">
+{/* Wadah field — submit-nya ditangani Astro Action. */}
+<form
+  method="POST"
+  class="space-y-4"
+  data-reveal="up"
+  data-post-form
+  data-post-id={postId}
+  data-post-action={action}
+>
   <Input label="Judul" name="title" value={post?.title} placeholder="Judul postingan" required />
 
   <div>
@@ -78,16 +91,54 @@ const tools = [
 
 <script>
   import { marked } from "marked";
+  import { actions } from "astro:actions";
+  import { navigate } from "astro:transitions/client";
+  import { toast } from "../../scripts/dashboard.ts";
 
   // Pratinjau = markdown server yang sama, dirender di klien.
   marked.use({ gfm: true, breaks: true });
 
-  const textarea = document.getElementById("body") as HTMLTextAreaElement | null;
-  const preview = document.getElementById("preview");
-  // shortcut: konten hanya ditulis admin (trusted), jadi HTML mentah tidak disanitasi.
-  // Sanitasi kalau nanti postingan bisa ditulis pengguna biasa.
+  // The router swaps the DOM but keeps this module, so the editor is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const textarea = document.getElementById("body") as HTMLTextAreaElement | null;
+    const preview = document.getElementById("preview");
+    // shortcut: konten hanya ditulis admin (trusted), jadi HTML mentah tidak disanitasi.
+    // Sanitasi kalau nanti postingan bisa ditulis pengguna biasa.
 
-  if (textarea && preview) {
+    if (!textarea || !preview || textarea.dataset.editorWired) return;
+    textarea.dataset.editorWired = "1";
+
+    // Terbitkan / sunting lewat Astro Action — halamannya tidak dimuat ulang.
+    const form = textarea.closest<HTMLFormElement>("[data-post-form]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const title = form.querySelector<HTMLInputElement>('[name="title"]')?.value ?? "";
+      const body = textarea.value;
+      if (!title.trim() || !body.trim()) {
+        toast("Judul dan isi wajib diisi.", "error");
+        return;
+      }
+
+      const submit = form.querySelector<HTMLButtonElement>("[type=submit]");
+      if (submit) submit.disabled = true;
+
+      const { data, error } = await actions.savePost({
+        id: form.dataset.postId ? Number(form.dataset.postId) : undefined,
+        title,
+        body,
+      });
+
+      if (submit) submit.disabled = false;
+
+      if (error || !data) {
+        toast(error?.message ?? "Postingan gagal disimpan.", "error");
+        return;
+      }
+      await navigate(data.url);
+      toast(form.dataset.postAction === "update" ? "Postingan diperbarui." : "Postingan diterbitkan.");
+    });
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     const render = () => {
       preview.innerHTML = marked.parse(textarea.value, { async: false }) as string;
@@ -123,6 +174,9 @@ const tools = [
     };
 
     document.querySelectorAll<HTMLButtonElement>("[data-md]").forEach((button) => {
+      if (button.dataset.mdWired) return;
+      button.dataset.mdWired = "1";
+
       button.addEventListener("click", () => {
         switch (button.dataset.md) {
           case "bold":
@@ -142,5 +196,8 @@ const tools = [
         }
       });
     });
-  }
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

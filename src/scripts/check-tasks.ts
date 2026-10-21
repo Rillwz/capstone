@@ -27,6 +27,10 @@ check("mingguan key", currentPeriodKey("Mingguan", "2026-10-20"), "2026-W43");
 check("bulanan key", currentPeriodKey("Bulanan", "2026-10-20"), "2026-10");
 check("semesteran key S1", currentPeriodKey("Semesteran", "2026-03-01"), "2026-S1");
 check("semesteran key S2", currentPeriodKey("Semesteran", "2026-10-20"), "2026-S2");
+check("triwulan key Q3", currentPeriodKey("Triwulan", "2026-09-30"), "2026-Q3");
+check("triwulan key Q4", currentPeriodKey("Triwulan", "2026-10-20"), "2026-Q4");
+check("tahunan key", currentPeriodKey("Tahunan", "2026-10-20"), "2026");
+check("kegiatan key (slot bulanan)", currentPeriodKey("Kegiatan", "2026-10-20"), "2026-10");
 
 // A Monday is the first day of its ISO week; the week belongs to the year of its Thursday.
 check("mingguan start (Monday)", currentPeriod("Mingguan", "2026-10-19").start, "2026-10-19");
@@ -63,6 +67,21 @@ check(
   dueDate("Semesteran", currentPeriod("Semesteran", "2026-10-20"), ""),
   "2026-12-31",
 );
+check(
+  "triwulan jatuh tempo",
+  dueDate("Triwulan", currentPeriod("Triwulan", "2026-10-20"), ""),
+  "2026-12-31",
+);
+check(
+  "tahunan jatuh tempo",
+  dueDate("Tahunan", currentPeriod("Tahunan", "2026-10-20"), ""),
+  "2026-12-31",
+);
+check(
+  "kegiatan jatuh tempo ikut tanggal aktivitas",
+  dueDate("Kegiatan", currentPeriod("Kegiatan", "2026-11-20"), "2026-10-25"),
+  "2026-11-25",
+);
 
 // --- past periods (what can be missed) ---
 const current = currentPeriod("Harian", "2026-10-20");
@@ -88,6 +107,21 @@ check(
   pastPeriods("Semesteran", "2026-03-01", currentPeriod("Semesteran", "2026-10-20")).map((p) => p.key),
   ["2026-S1"],
 );
+check(
+  "triwulan: kuartal lalu",
+  pastPeriods("Triwulan", "2026-04-01", currentPeriod("Triwulan", "2026-10-20")).map((p) => p.key),
+  ["2026-Q2", "2026-Q3"],
+);
+check(
+  "tahunan: tahun lalu",
+  pastPeriods("Tahunan", "2024-06-01", currentPeriod("Tahunan", "2026-10-20")).map((p) => p.key),
+  ["2024", "2025"],
+);
+check(
+  "kegiatan: bulan lalu",
+  pastPeriods("Kegiatan", "2026-07-15", currentPeriod("Kegiatan", "2026-10-20")).map((p) => p.key),
+  ["2026-07", "2026-08", "2026-09"],
+);
 
 // --- round trips ---
 check("periodFromKey harian", periodFromKey("Harian", "2026-10-20"), {
@@ -101,6 +135,16 @@ check("periodFromKey semesteran", periodFromKey("Semesteran", "2026-S1"), {
   key: "2026-S1",
   start: "2026-01-01",
   end: "2026-06-30",
+});
+check("periodFromKey triwulan", periodFromKey("Triwulan", "2026-Q4"), {
+  key: "2026-Q4",
+  start: "2026-10-01",
+  end: "2026-12-31",
+});
+check("periodFromKey tahunan", periodFromKey("Tahunan", "2026"), {
+  key: "2026",
+  start: "2026-01-01",
+  end: "2026-12-31",
 });
 
 // --- misc ---

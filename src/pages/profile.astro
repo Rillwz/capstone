@@ -48,7 +48,12 @@ const justSaved = Astro.url.searchParams.has("saved");
 
   {
     justSaved && (
-      <p data-notice class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+      <p
+        data-notice
+        data-notice-params="saved"
+        class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+        role="status"
+      >
         Perubahan disimpan.
       </p>
     )
@@ -78,16 +83,5 @@ const justSaved = Astro.url.searchParams.has("saved");
 <script>
   // Flash notice ("Perubahan disimpan.") leaves on its own after 4s, and the query param
   // goes with it so a refresh cannot show it twice.
-  const notice = document.querySelector<HTMLElement>("[data-notice]");
-  if (notice) {
-    setTimeout(() => {
-      notice.classList.add("is-leaving");
-      setTimeout(() => {
-        notice.remove();
-        const url = new URL(location.href);
-        url.searchParams.delete("saved");
-        history.replaceState(null, "", url.pathname + url.search);
-      }, 400);
-    }, 4000);
-  }
+  import "../scripts/notices.ts";
 </script>

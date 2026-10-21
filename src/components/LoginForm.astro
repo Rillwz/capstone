@@ -42,29 +42,39 @@ const errorMessage = error ? (ERROR_MESSAGES[error] ?? "Email atau kata sandi sa
 <script>
   import { signIn } from "auth-astro/client";
 
-  const form = document.getElementById("login-form") as HTMLFormElement;
-  form?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const data = new FormData(form);
-    // Credentials inputs travel in the body (signIn spreads options into the POST body).
-    const res = await signIn("credentials", {
-      email: data.get("email") as string,
-      password: data.get("password") as string,
-      redirect: false,
-      callbackUrl: "/",
-    } as Parameters<typeof signIn>[1]);
+  // The router swaps the DOM but keeps this module, so the form is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const form = document.getElementById("login-form") as HTMLFormElement | null;
+    if (!form || form.dataset.loginWired) return;
+    form.dataset.loginWired = "1";
 
-    if (!res) {
-      // No error returned → Auth.js navigated; fall back to the role dispatcher.
-      window.location.href = "/";
-      return;
-    }
-    const json = await res.clone().json().catch(() => ({ url: "/login?error=CredentialsSignin" }));
-    const url = new URL(json.url ?? "/login?error=1", window.location.origin);
-    if (url.searchParams.has("error")) {
-      window.location.href = `/login?error=${encodeURIComponent(url.searchParams.get("error")!)}`;
-    } else {
-      window.location.href = json.url ?? "/";
-    }
-  });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = new FormData(form);
+      // Credentials inputs travel in the body (signIn spreads options into the POST body).
+      const res = await signIn("credentials", {
+        email: data.get("email") as string,
+        password: data.get("password") as string,
+        redirect: false,
+        callbackUrl: "/",
+      } as Parameters<typeof signIn>[1]);
+
+      if (!res) {
+        // No error returned → Auth.js navigated; fall back to the role dispatcher.
+        window.location.href = "/";
+        return;
+      }
+      const json = await res.clone().json().catch(() => ({ url: "/login?error=CredentialsSignin" }));
+      const url = new URL(json.url ?? "/login?error=1", window.location.origin);
+      if (url.searchParams.has("error")) {
+        window.location.href = `/login?error=${encodeURIComponent(url.searchParams.get("error")!)}`;
+      } else {
+        window.location.href = json.url ?? "/";
+      }
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

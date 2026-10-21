@@ -1,13 +1,13 @@
 ---
-// Post list — moved off /dashboard, which is now the overview. Deletes arrive as an
-// inline POST (works without JS). Search (?q) and pagination (?page) are plain GETs,
-// so they never interfere with the POST actions below. Reordering is a JS-only
-// POST to this same URL with action=reorder.
+// Post list — moved off /dashboard, which is now the overview. Deleting goes through
+// an Astro Action (src/actions), so the page is re-rendered without a full reload.
+// Search (?q) and pagination (?page) are plain GETs, so they never interfere with the
+// POST below. Reordering is a JS-only POST to this same URL with action=reorder.
 import { GripVertical, Newspaper, Pencil, Search, SquarePen, Trash } from "@lucide/astro";
 import Button from "../../components/ui/Button.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
-import { countPosts, deletePost, listPostsPage, reorderPosts } from "../../lib/db";
+import { countPosts, listPostsPage, reorderPosts } from "../../lib/db";
 import { formatDateTime } from "../../lib/format";
 
 const PAGE_SIZE = 10;
@@ -18,13 +18,6 @@ if (session instanceof Response) return session;
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
   const action = form.get("action");
-
-  if (action === "delete") {
-    const id = Number(form.get("id"));
-    if (Number.isInteger(id)) deletePost(id);
-    // Keep the current search/page after deleting.
-    return Astro.redirect(`${Astro.url.pathname}${Astro.url.search}`);
-  }
 
   if (action === "reorder") {
     const ids = String(form.get("ids") ?? "")
@@ -60,7 +53,7 @@ const pageLinks =
 ---
 
 <DashboardLayout title="Postingan" user={session.user}>
-  <div class="flex flex-wrap items-end justify-between gap-3">
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
     <div>
       <h1 class="text-xl font-semibold text-slate-900">Postingan</h1>
       <p class="mt-1 text-sm text-slate-500">
@@ -70,7 +63,7 @@ const pageLinks =
     <Button href="/dashboard/posts/new"><SquarePen class="size-4" />Tulis postingan</Button>
   </div>
 
-  <form method="GET" role="search" class="mt-6 flex flex-wrap items-center gap-2">
+  <form method="GET" role="search" class="mt-6 flex flex-wrap items-center gap-2" data-reveal="up">
     <div class="relative min-w-0 flex-1 sm:max-w-sm">
       <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
       <label for="field-search" class="sr-only">Cari postingan</label>
@@ -89,7 +82,7 @@ const pageLinks =
 
   {
     posts.length === 0 ? (
-      <div class="mt-6 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+      <div class="mt-6 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center" data-reveal="up">
         <Newspaper class="mx-auto size-8 text-slate-300" />
         <p class="mt-3 text-sm text-slate-500">
           {q ? (
@@ -130,7 +123,7 @@ const pageLinks =
           class="mt-2 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white"
         >
           {posts.map((post) => (
-            <li data-id={post.id} class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4">
+            <li data-id={post.id} class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4" data-reveal="fade">
               {sortable && (
                 <button
                   type="button"
@@ -159,17 +152,17 @@ const pageLinks =
                   <Pencil class="size-4" />
                   Edit
                 </Button>
-                <form
-                  method="POST"
-                  onsubmit="return confirm('Hapus postingan ini? Tindakan ini tidak bisa dibatalkan.')"
+                <Button
+                  variant="danger"
+                  size="sm"
+                  type="button"
+                  data-delete-post
+                  data-post-id={post.id}
+                  data-post-title={post.title}
                 >
-                  <input type="hidden" name="action" value="delete" />
-                  <input type="hidden" name="id" value={post.id} />
-                  <Button variant="danger" size="sm" type="submit">
-                    <Trash class="size-4" />
-                    Hapus
-                  </Button>
-                </form>
+                  <Trash class="size-4" />
+                  Hapus
+                </Button>
               </div>
             </li>
           ))}
@@ -177,7 +170,7 @@ const pageLinks =
 
         {
           pageCount > 1 && (
-            <nav class="mt-4 flex flex-wrap items-center justify-between gap-3" aria-label="Halaman postingan">
+            <nav class="mt-4 flex flex-wrap items-center justify-between gap-3" aria-label="Halaman postingan" data-reveal="up">
               <p class="text-sm text-slate-500">
                 Halaman {page} dari {pageCount}
               </p>
@@ -218,70 +211,116 @@ const pageLinks =
   }
 
   <script>
-    const list = document.querySelector<HTMLElement>("[data-sortable]");
-    const status = document.getElementById("reorder-status");
-    const hint = status?.innerHTML ?? "";
+    import { animate } from "motion";
+    import { actions } from "astro:actions";
+    import { refreshPage, toast } from "../../scripts/dashboard.ts";
 
-    if (list) {
-      const rows = () => [...list.querySelectorAll<HTMLElement>("[data-id]")];
-      const save = async () => {
-        const body = new FormData();
-        body.set("action", "reorder");
-        body.set("ids", rows().map((row) => row.dataset.id).join(","));
-        body.set("offset", list.dataset.offset ?? "0");
-        if (status) status.textContent = "Menyimpan urutan…";
-        const res = await fetch(location.href, { method: "POST", body }).catch(() => null);
-        if (status) status.innerHTML = res?.ok ? "Urutan tersimpan." : hint;
-        if (!res?.ok) location.reload();
-      };
+    // The router swaps the DOM but keeps this module, so the list is wired again on
+    // every astro:page-load.
+    const init = () => {
+      // The body is replaced on every navigation, so this marker is per page.
+      if (document.body.dataset.postsWired) return;
+      document.body.dataset.postsWired = "1";
 
-      let dragged: HTMLElement | null = null;
-      let startOrder = "";
-      const order = () => rows().map((row) => row.dataset.id).join(",");
+      // Hapus satu postingan — Astro Action, jadi halamannya tidak dimuat ulang.
+      document.querySelectorAll<HTMLButtonElement>("[data-delete-post]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const title = button.dataset.postTitle ?? "postingan ini";
+          if (!confirm(`Hapus "${title}"? Tindakan ini tidak bisa dibatalkan.`)) return;
 
-      list.addEventListener("dragstart", (event) => {
-        const handle = (event.target as HTMLElement).closest("[data-drag-handle]");
-        dragged = handle?.closest<HTMLElement>("[data-id]") ?? null;
-        if (!dragged) return;
-        startOrder = order();
-        dragged.classList.add("opacity-50");
-        event.dataTransfer?.setData("text/plain", dragged.dataset.id ?? "");
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+          button.disabled = true;
+          const { error } = await actions.deletePost({ id: Number(button.dataset.postId ?? 0) });
+          button.disabled = false;
+          if (error) {
+            toast(error.message ?? "Postingan gagal dihapus.", "error");
+            return;
+          }
+          await refreshPage();
+          toast("Postingan dihapus.");
+        });
       });
 
-      // Save on dragend, not drop: Chrome abandons the drop when dragover moves the
-      // dragged row, which left the new order unsaved.
-      list.addEventListener("dragend", () => {
-        dragged?.classList.remove("opacity-50");
-        dragged = null;
-        if (order() !== startOrder) void save();
-      });
+      const list = document.querySelector<HTMLElement>("[data-sortable]");
+      const status = document.getElementById("reorder-status");
+      const hint = status?.innerHTML ?? "";
 
-      list.addEventListener("dragover", (event) => {
-        const target = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
-        if (!dragged || !target || target === dragged) return;
-        event.preventDefault();
-        const rect = target.getBoundingClientRect();
-        target.parentElement?.insertBefore(
-          dragged,
-          event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target,
-        );
-      });
+      if (list) {
+        const rows = () => [...list.querySelectorAll<HTMLElement>("[data-id]")];
+        const save = async () => {
+          const body = new FormData();
+          body.set("action", "reorder");
+          body.set("ids", rows().map((row) => row.dataset.id).join(","));
+          body.set("offset", list.dataset.offset ?? "0");
+          if (status) status.textContent = "Menyimpan urutan…";
+          const res = await fetch(location.href, { method: "POST", body }).catch(() => null);
+          if (status) status.innerHTML = res?.ok ? "Urutan tersimpan." : hint;
+          if (!res?.ok) location.reload();
+        };
 
-      list.addEventListener("drop", (event) => event.preventDefault());
+        let dragged: HTMLElement | null = null;
+        let startOrder = "";
+        const order = () => rows().map((row) => row.dataset.id).join(",");
 
-      // Keyboard alternative to dragging: focus the handle, press ↑ / ↓.
-      list.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-        const row = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
-        if (!row) return;
-        event.preventDefault();
-        const sibling = event.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
-        if (!sibling) return;
-        list.insertBefore(row, event.key === "ArrowUp" ? sibling : sibling.nextSibling);
-        row.querySelector<HTMLElement>("[data-drag-handle]")?.focus();
-        void save();
-      });
-    }
+        list.addEventListener("dragstart", (event) => {
+          const handle = (event.target as HTMLElement).closest("[data-drag-handle]");
+          dragged = handle?.closest<HTMLElement>("[data-id]") ?? null;
+          if (!dragged) return;
+          startOrder = order();
+          dragged.classList.add("opacity-50");
+          // Baris yang di-drag angst sedikit, supaya jelas mana yang sedang digeser.
+          animate(
+            dragged,
+            { scaleX: 1.01, scaleY: 1.01, boxShadow: "0 14px 28px -14px rgb(15 23 42 / 0.45)" },
+            { type: "spring", stiffness: 420, damping: 30 },
+          );
+          event.dataTransfer?.setData("text/plain", dragged.dataset.id ?? "");
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+        });
+
+        // Save on dragend, not drop: Chrome abandons the drop when dragover moves the
+        // dragged row, which left the new order unsaved.
+        list.addEventListener("dragend", () => {
+          if (dragged) {
+            animate(
+              dragged,
+              { scaleX: 1, scaleY: 1, boxShadow: "0 0 0 rgb(15 23 42 / 0)" },
+              { type: "spring", stiffness: 420, damping: 30 },
+            );
+          }
+          dragged?.classList.remove("opacity-50");
+          dragged = null;
+          if (order() !== startOrder) void save();
+        });
+
+        list.addEventListener("dragover", (event) => {
+          const target = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
+          if (!dragged || !target || target === dragged) return;
+          event.preventDefault();
+          const rect = target.getBoundingClientRect();
+          target.parentElement?.insertBefore(
+            dragged,
+            event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target,
+          );
+        });
+
+        list.addEventListener("drop", (event) => event.preventDefault());
+
+        // Keyboard alternative to dragging: focus the handle, press ↑ / ↓.
+        list.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+          const row = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
+          if (!row) return;
+          event.preventDefault();
+          const sibling = event.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+          if (!sibling) return;
+          list.insertBefore(row, event.key === "ArrowUp" ? sibling : sibling.nextSibling);
+          row.querySelector<HTMLElement>("[data-drag-handle]")?.focus();
+          void save();
+        });
+      }
+    };
+
+    document.addEventListener("astro:page-load", init);
+    init();
   </script>
 </DashboardLayout>

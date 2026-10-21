@@ -7,7 +7,10 @@
 //   Harian      "2026-10-20"
 //   Mingguan    "2026-W43"   (ISO week, Monday first)
 //   Bulanan     "2026-10"
+//   Triwulan    "2026-Q4"    (Oct–Dec)
 //   Semesteran  "2026-S1" / "2026-S2"   (Jan–Jun / Jul–Dec)
+//   Tahunan     "2026"
+//   Kegiatan    "2026-10"    (tugas sewaktu — slotnya bulanan, labelnya sendiri)
 //
 // Calendar arithmetic runs on plain dates in UTC: no daylight saving anywhere near
 // Jakarta, so a civil date never shifts.
@@ -29,9 +32,9 @@ export function dbDateToIso(value: string): string {
 
 const parse = (date: string) => new Date(`${date}T00:00:00Z`);
 const format = (d: Date) => d.toISOString().slice(0, 10);
-const addDays = (date: string, days: number) =>
+export const addDays = (date: string, days: number) =>
   format(new Date(parse(date).getTime() + days * 86400000));
-const daysInMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+export const daysInMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 
 /** Monday of the week `date` falls in. */
 const weekStart = (date: string) => addDays(date, -((parse(date).getUTCDay() + 6) % 7));
@@ -66,9 +69,15 @@ export function currentPeriodKey(periode: Periode, today: string): string {
     case "Mingguan":
       return isoWeekKey(weekStart(today));
     case "Bulanan":
+    // "Kegiatan" is an event, not a calendar slot — it repeats every month.
+    case "Kegiatan":
       return today.slice(0, 7);
+    case "Triwulan":
+      return `${today.slice(0, 4)}-Q${Math.ceil(Number(today.slice(5, 7)) / 3)}`;
     case "Semesteran":
       return `${today.slice(0, 4)}-S${Number(today.slice(5, 7)) <= 6 ? 1 : 2}`;
+    case "Tahunan":
+      return today.slice(0, 4);
   }
 }
 
@@ -82,10 +91,21 @@ export function periodFromKey(periode: Periode, key: string): Period {
       const monday = addDays(weekStart(`${year}-01-04`), (Number(week) - 1) * 7);
       return { key, start: monday, end: addDays(monday, 6) };
     }
-    case "Bulanan": {
+    case "Bulanan":
+    case "Kegiatan": {
       const year = Number(key.slice(0, 4));
       const month = Number(key.slice(5, 7));
       return { key, start: `${key}-01`, end: `${key}-${String(daysInMonth(year, month)).padStart(2, "0")}` };
+    }
+    case "Triwulan": {
+      const [year, quarter] = key.split("-Q");
+      const first = (Number(quarter) - 1) * 3 + 1;
+      const last = first + 2;
+      return {
+        key,
+        start: `${year}-${String(first).padStart(2, "0")}-01`,
+        end: `${year}-${String(last).padStart(2, "0")}-${String(daysInMonth(Number(year), last)).padStart(2, "0")}`,
+      };
     }
     case "Semesteran": {
       const [year, half] = key.split("-S");
@@ -93,6 +113,8 @@ export function periodFromKey(periode: Periode, key: string): Period {
         ? { key, start: `${year}-01-01`, end: `${year}-06-30` }
         : { key, start: `${year}-07-01`, end: `${year}-12-31` };
     }
+    case "Tahunan":
+      return { key, start: `${key}-01-01`, end: `${key}-12-31` };
   }
 }
 
@@ -130,7 +152,7 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
     return out;
   }
 
-  if (periode === "Bulanan") {
+  if (periode === "Bulanan" || periode === "Kegiatan") {
     let year = Number(from.slice(0, 4));
     let month = Number(from.slice(5, 7));
     while (out.length < MAX_PERIODS) {
@@ -142,6 +164,33 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
         month = 1;
         year += 1;
       }
+    }
+    return out;
+  }
+
+  if (periode === "Triwulan") {
+    let year = Number(from.slice(0, 4));
+    let quarter = Math.ceil(Number(from.slice(5, 7)) / 3);
+    while (out.length < MAX_PERIODS) {
+      const key = `${year}-Q${quarter}`;
+      if (periodFromKey(periode, key).start >= current.start) break;
+      out.push(periodFromKey(periode, key));
+      quarter += 1;
+      if (quarter > 4) {
+        quarter = 1;
+        year += 1;
+      }
+    }
+    return out;
+  }
+
+  if (periode === "Tahunan") {
+    let year = Number(from.slice(0, 4));
+    while (out.length < MAX_PERIODS) {
+      const key = String(year);
+      if (periodFromKey(periode, key).start >= current.start) break;
+      out.push(periodFromKey(periode, key));
+      year += 1;
     }
     return out;
   }
@@ -168,7 +217,7 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
  * own day of the month; without one the month itself is the deadline.
  */
 export function dueDate(periode: Periode, period: Period, activityDate: string): string {
-  if (periode === "Bulanan" && activityDate) {
+  if ((periode === "Bulanan" || periode === "Kegiatan") && activityDate) {
     const day = Number(activityDate.slice(8, 10));
     const last = daysInMonth(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)));
     return `${period.key}-${String(Math.min(day, last)).padStart(2, "0")}`;

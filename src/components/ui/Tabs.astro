@@ -51,34 +51,44 @@ const { items, ariaLabel = "Tab", class: className } = Astro.props;
 </div>
 
 <script>
-  document.querySelectorAll<HTMLElement>("[data-tabs]").forEach((root) => {
-    const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
-    const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+  // The router swaps the DOM but keeps this module, so the tabs are wired again on
+  // every astro:page-load.
+  const init = () => {
+    document.querySelectorAll<HTMLElement>("[data-tabs]").forEach((root) => {
+      if (root.dataset.tabsWired) return;
+      root.dataset.tabsWired = "1";
 
-    const select = (index: number, focus = true) => {
-      tabs.forEach((tab, i) => {
-        tab.setAttribute("aria-selected", String(i === index));
-        tab.tabIndex = i === index ? 0 : -1;
-        panels[i].hidden = i !== index;
+      const tabs = [...root.querySelectorAll<HTMLElement>('[role="tab"]')];
+      const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+
+      const select = (index: number, focus = true) => {
+        tabs.forEach((tab, i) => {
+          tab.setAttribute("aria-selected", String(i === index));
+          tab.tabIndex = i === index ? 0 : -1;
+          panels[i].hidden = i !== index;
+        });
+        if (focus) tabs[index].focus();
+      };
+
+      tabs.forEach((tab, i) => tab.addEventListener("click", () => select(i, false)));
+
+      root.addEventListener("keydown", (event) => {
+        const i = tabs.indexOf(document.activeElement as HTMLElement);
+        if (i === -1) return;
+
+        let next = i;
+        if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        else return;
+
+        event.preventDefault();
+        select(next);
       });
-      if (focus) tabs[index].focus();
-    };
-
-    tabs.forEach((tab, i) => tab.addEventListener("click", () => select(i, false)));
-
-    root.addEventListener("keydown", (event) => {
-      const i = tabs.indexOf(document.activeElement as HTMLElement);
-      if (i === -1) return;
-
-      let next = i;
-      if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
-      else if (event.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = tabs.length - 1;
-      else return;
-
-      event.preventDefault();
-      select(next);
     });
-  });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

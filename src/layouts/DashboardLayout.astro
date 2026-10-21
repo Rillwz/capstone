@@ -63,6 +63,14 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
           </a>
         </div>
       </div>
+
+      <!-- Progress baca: menempel di tepi header, mengikuti posisi scroll. -->
+      <div
+        data-scroll-progress
+        aria-hidden="true"
+        class="absolute inset-x-0 bottom-0 h-0.5 origin-left scale-x-0 bg-brand-600/50"
+      >
+      </div>
     </header>
 
     <div class="mx-auto flex max-w-6xl items-start gap-6 px-4 py-8 sm:px-6 lg:max-w-7xl">
@@ -78,14 +86,27 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
 </Layout>
 
 <script>
+  // Micro-animations for the whole dashboard: one kit, one timing vocabulary.
+  import "../scripts/motion.ts";
+
   // "Keluar" signs out immediately: the plain link stays as the no-JS fallback, but with
   // JS we post the CSRF-protected signout instead of landing on Auth.js' confirm page.
   import { signOut } from "auth-astro/client";
 
-  document.querySelectorAll<HTMLAnchorElement>("[data-signout]").forEach((link) => {
-    link.addEventListener("click", (event) => {
-      event.preventDefault();
-      void signOut({ callbackUrl: "/login" });
+  // The router swaps the DOM but keeps this module, so the link is wired again on
+  // every astro:page-load.
+  const init = () => {
+    document.querySelectorAll<HTMLAnchorElement>("[data-signout]").forEach((link) => {
+      if (link.dataset.signoutWired) return;
+      link.dataset.signoutWired = "1";
+
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void signOut({ callbackUrl: "/login" });
+      });
     });
-  });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

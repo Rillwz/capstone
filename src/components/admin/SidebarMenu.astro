@@ -76,10 +76,15 @@ const initials = (user?.name ?? "A")
 </dialog>
 
 <script>
-  const menu = document.getElementById("dashboard-menu") as HTMLDialogElement | null;
-  const trigger = document.querySelector<HTMLButtonElement>("[data-menu-open]");
+  // The router swaps the DOM but keeps this module, so the drawer is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const menu = document.getElementById("dashboard-menu") as HTMLDialogElement | null;
+    const trigger = document.querySelector<HTMLButtonElement>("[data-menu-open]");
 
-  if (menu && trigger) {
+    if (!menu || !trigger || trigger.dataset.menuWired) return;
+    trigger.dataset.menuWired = "1";
+
     const setExpanded = (open: boolean) => trigger.setAttribute("aria-expanded", String(open));
 
     trigger.addEventListener("click", () => {
@@ -103,5 +108,8 @@ const initials = (user?.name ?? "A")
     matchMedia("(min-width: 64rem)").addEventListener("change", (event) => {
       if (event.matches) menu.close();
     });
-  }
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

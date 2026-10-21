@@ -1,0 +1,218 @@
+---
+// Dialog catatan & tautan untuk satu kemunculan tugas.
+//
+// Bukaannya dua arah: tanpa JavaScript, halaman datang dengan ?note=&period= dan
+// dialog ini sudah terbuka (datanya dirender server); dengan JavaScript, tombol
+// "+" intercepted dan dialognya dibuka di tempat.
+import { X } from "@lucide/astro";
+import Button from "../ui/Button.astro";
+import { NOTE_MAX } from "../../lib/notes";
+
+interface Props {
+  /** Kemunculan yang sedang disunting — undefined berarti dialognya masih kosong. */
+  occurrence?: {
+    activityId: number;
+    periodKey: string;
+    name: string;
+    note: string;
+    link: string;
+  };
+  error?: string;
+}
+
+const { occurrence, error } = Astro.props;
+---
+
+<dialog
+  id="note-dialog"
+  class="app-dialog w-[calc(100vw-2rem)] max-w-lg"
+  aria-labelledby="note-dialog-title"
+  data-open={occurrence ? "" : undefined}
+>
+  <form method="POST" class="p-5 sm:p-6">
+    <input type="hidden" name="action" value="note" />
+    <input type="hidden" name="activityId" value={occurrence?.activityId ?? ""} />
+    <input type="hidden" name="periodKey" value={occurrence?.periodKey ?? ""} />
+
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h2 id="note-dialog-title" class="text-base font-semibold text-slate-900">Catatan & tautan</h2>
+        <p data-note-heading class="mt-0.5 truncate text-xs text-slate-500">
+          {occurrence?.name ?? "Kemunculan tugas"}
+        </p>
+      </div>
+      <button
+        type="button"
+        data-dialog-close
+        aria-label="Tutup"
+        class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+
+    <div class="mt-4 space-y-4">
+      <div>
+        <label for="field-note" class="mb-1.5 block text-sm font-medium text-slate-700">Keterangan</label>
+        <textarea
+          id="field-note"
+          name="note"
+          rows="4"
+          maxlength={NOTE_MAX}
+          placeholder="Catatan singkat tentang pekerjaan ini…"
+          class="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+        >{occurrence?.note ?? ""}</textarea>
+      </div>
+
+      <div>
+        <label for="field-link" class="mb-1.5 block text-sm font-medium text-slate-700">
+          Tautan <span class="text-slate-400">(opsional)</span>
+        </label>
+        <input
+          id="field-link"
+          name="link"
+          type="url"
+          inputmode="url"
+          placeholder="https://…"
+          value={occurrence?.link ?? ""}
+          class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+        />
+        <p class="mt-1.5 text-xs text-slate-500">Hanya tautan http:// atau https:// yang disimpan.</p>
+      </div>
+
+      <p
+        data-note-error
+        class:list={[
+          "rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700",
+          !error && "hidden",
+        ]}
+        role="alert"
+      >
+        {error ?? ""}
+      </p>
+    </div>
+
+    <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+      <Button type="submit" data-note-save>Simpan</Button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  import { actions } from "astro:actions";
+  import { parseNoteValues } from "../../lib/notes";
+  import { setTaskNote } from "../../scripts/tasks.ts";
+
+  // The router swaps the DOM but keeps this module, so the dialog is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const dialog = document.getElementById("note-dialog") as HTMLDialogElement | null;
+    if (!dialog || dialog.dataset.noteWired) return;
+    dialog.dataset.noteWired = "1";
+
+    const heading = dialog.querySelector<HTMLElement>("[data-note-heading]");
+    const activityInput = dialog.querySelector<HTMLInputElement>('input[name="activityId"]');
+    const periodInput = dialog.querySelector<HTMLInputElement>('input[name="periodKey"]');
+    const noteInput = dialog.querySelector<HTMLTextAreaElement>('textarea[name="note"]');
+    const linkInput = dialog.querySelector<HTMLInputElement>('input[name="link"]');
+    const errorBox = dialog.querySelector<HTMLElement>("[data-note-error]");
+
+    // Isi dialog dari kartu yang diklik: teks catatan dan tautan yang tersimpan
+    // diambil dari elemennya, jadi tidak perlu diduplikasi di atribut.
+    document.querySelectorAll<HTMLElement>("[data-note-open]").forEach((button) => {
+      if (button.dataset.noteOpenWired) return;
+      button.dataset.noteOpenWired = "1";
+
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        const card = button.closest<HTMLElement>("[data-task]");
+        if (activityInput) activityInput.value = button.dataset.activityId ?? "";
+        if (periodInput) periodInput.value = button.dataset.periodKey ?? "";
+        if (heading) heading.textContent = button.dataset.name ?? "";
+        if (noteInput) noteInput.value = card?.querySelector<HTMLElement>("[data-note-text]")?.textContent?.trim() ?? "";
+        if (linkInput) {
+          // Tautan yang tersimpan dibaca dari atributnya — bukan dari href, yang bisa
+          // cuma placeholder "#" dan membuat browser menolak formulir.
+          linkInput.value = card?.querySelector<HTMLElement>("[data-note-url]")?.getAttribute("data-note-url") ?? "";
+        }
+        if (errorBox) errorBox.hidden = true;
+        dialog.showModal();
+        // A modal <dialog> blocks interaction but not page scrolling.
+        document.documentElement.style.overflow = "hidden";
+        noteInput?.focus();
+      });
+    });
+
+    dialog.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+    });
+    // Click on the backdrop (the dialog element itself) closes.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
+
+    // The save goes through an Astro Action: the page is patched in place, no reload.
+    const form = dialog.querySelector<HTMLFormElement>("form");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const note = noteInput?.value ?? "";
+      const link = linkInput?.value ?? "";
+
+      // Validasi di klien dulu: kesalahan input tidak perlu menyentuh server.
+      // Server tetap memvalidasinya sendiri — klien tidak boleh dipercaya.
+      const parsed = parseNoteValues(note, link);
+      if ("error" in parsed) {
+        if (errorBox) {
+          errorBox.textContent = parsed.error;
+          errorBox.hidden = false;
+        }
+        return;
+      }
+      if (errorBox) errorBox.hidden = true;
+
+      const save = dialog.querySelector<HTMLButtonElement>("[data-note-save]");
+      if (save) save.disabled = true;
+
+      const { error } = await actions.saveNote({
+        activityId: Number(activityInput?.value ?? 0),
+        periodKey: periodInput?.value ?? "",
+        note,
+        link,
+      });
+
+      if (save) save.disabled = false;
+
+      if (error) {
+        if (errorBox) {
+          errorBox.textContent = error.message ?? "Catatan gagal disimpan.";
+          errorBox.hidden = false;
+        }
+        return;
+      }
+
+      // Pasang catatan & tautannya langsung ke kartunya.
+      const card = document.querySelector<HTMLElement>(
+        `[data-task][data-activity-id="${activityInput?.value}"][data-period-key="${periodInput?.value}"]`,
+      );
+      if (card) {
+        setTaskNote(card, parsed.value.note, parsed.value.link);
+      }
+
+      dialog.close();
+    });
+
+    // Datang dari halaman tanpa JavaScript: dialognya sudah dirender terbuka.
+    if (dialog.dataset.open !== undefined) {
+      dialog.showModal();
+      document.documentElement.style.overflow = "hidden";
+    }
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

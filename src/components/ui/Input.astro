@@ -72,21 +72,32 @@ const isPassword = type === "password";
 <script>
   // Password reveal ("unhide"). One listener per button keeps the markup declarative —
   // the field, its label text and the button state are all readable from the DOM.
-  document.querySelectorAll<HTMLButtonElement>("[data-reveal-toggle]").forEach((button) => {
-    const input = document.getElementById(button.getAttribute("aria-controls") ?? "");
-    const [eye, eyeOff] = button.querySelectorAll("svg");
-    if (!(input instanceof HTMLInputElement) || !eye || !eyeOff) return;
+  //
+  // The router swaps the DOM but keeps this module, so the buttons are wired again on
+  // every astro:page-load.
+  const init = () => {
+    document.querySelectorAll<HTMLButtonElement>("[data-reveal-toggle]").forEach((button) => {
+      if (button.dataset.revealWired) return;
+      button.dataset.revealWired = "1";
 
-    button.addEventListener("click", (event) => {
-      const reveal = input.type === "password";
-      input.type = reveal ? "text" : "password";
-      button.setAttribute("aria-pressed", String(reveal));
-      button.setAttribute("aria-label", reveal ? "Sembunyikan kata sandi" : "Tampilkan kata sandi");
-      eye.classList.toggle("hidden", reveal);
-      eyeOff.classList.toggle("hidden", !reveal);
-      // Pointer users keep typing straight away; keyboard users stay on the button
-      // (event.detail is 0 when the click comes from the keyboard).
-      if (event.detail > 0) input.focus({ preventScroll: true });
+      const input = document.getElementById(button.getAttribute("aria-controls") ?? "");
+      const [eye, eyeOff] = button.querySelectorAll("svg");
+      if (!(input instanceof HTMLInputElement) || !eye || !eyeOff) return;
+
+      button.addEventListener("click", (event) => {
+        const reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        button.setAttribute("aria-pressed", String(reveal));
+        button.setAttribute("aria-label", reveal ? "Sembunyikan kata sandi" : "Tampilkan kata sandi");
+        eye.classList.toggle("hidden", reveal);
+        eyeOff.classList.toggle("hidden", !reveal);
+        // Pointer users keep typing straight away; keyboard users stay on the button
+        // (event.detail is 0 when the click comes from the keyboard).
+        if (event.detail > 0) input.focus({ preventScroll: true });
+      });
     });
-  });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

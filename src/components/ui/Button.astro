@@ -37,6 +37,6 @@ const classes = [base, variants[variant], sizes[size], className].filter(Boolean
 const Tag = href ? "a" : "button";
 ---
 
-<Tag href={href} type={href ? undefined : type} disabled={disabled} class={classes} {...rest}>
+<Tag href={href} type={href ? undefined : type} disabled={disabled} class={classes} data-press {...rest}>
   <slot />
 </Tag>

@@ -1,4 +1,5 @@
 ---
+import { ClientRouter } from "astro:transitions";
 import "../styles/global.css";
 
 interface Props {
@@ -15,10 +16,17 @@ const { title } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <title>{title} · Better Belt</title>
+    <!-- The router turns every form POST into an in-page transition, so actions
+         no longer reload the whole page. -->
+    <ClientRouter />
     <script is:inline>
       // Set the theme before the first paint, otherwise the page flashes the wrong
       // palette. An explicit choice wins; without one the system preference decides.
       (() => {
+        // Marks the document as scripted: the CSS that hides the pre-animation
+        // state of a reveal only applies when there is JS to bring it back.
+        document.documentElement.classList.add("js");
+
         let stored = null;
         try {
           stored = localStorage.getItem("assignment-theme");
@@ -33,9 +41,29 @@ const { title } = Astro.props;
               : "light";
         document.documentElement.dataset.theme = theme;
       })();
+
+      // Safety net: if the motion bundle never arrives, a reveal block must not
+      // stay invisible. Whatever already sits in the viewport is shown anyway.
+      setTimeout(() => {
+        document.querySelectorAll("[data-reveal]").forEach((el) => {
+          if (el.getBoundingClientRect().top < window.innerHeight - 40) el.style.opacity = "1";
+        });
+      }, 1500);
     </script>
   </head>
   <body>
     <slot />
   </body>
 </html>
+
+<script>
+  // The router replaces the <html> attributes as well, so the theme and the "js"
+  // marker have to be put back after every navigation — otherwise the page would
+  // come back in the default palette.
+  import { preferredTheme } from "../scripts/theme.ts";
+
+  document.addEventListener("astro:after-swap", () => {
+    document.documentElement.classList.add("js");
+    document.documentElement.dataset.theme = preferredTheme();
+  });
+</script>

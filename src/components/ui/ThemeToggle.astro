@@ -77,39 +77,75 @@ const options: Array<{
 </dialog>
 
 <script>
+  import { animate } from "motion";
   import { applyTheme, currentTheme, watchSystemTheme } from "../../scripts/theme.ts";
   import type { Theme } from "../../scripts/theme.ts";
 
-  const dialog = document.querySelector<HTMLDialogElement>("[data-theme-dialog]");
-  const trigger = document.querySelector<HTMLElement>("[data-theme-open]");
+  // The router swaps the DOM but keeps this module, so the dialog is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const dialog = document.querySelector<HTMLDialogElement>("[data-theme-dialog]");
+    const trigger = document.querySelector<HTMLElement>("[data-theme-open]");
+    if (!dialog || !trigger || trigger.dataset.themeWired) return;
+    trigger.dataset.themeWired = "1";
 
-  trigger?.addEventListener("click", () => {
-    if (!dialog) return;
-    // Tick the theme that is in effect.
-    dialog.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((input) => {
-      input.checked = input.value === currentTheme();
+    trigger.addEventListener("click", () => {
+      // Tick the theme that is in effect.
+      dialog.querySelectorAll<HTMLInputElement>('input[name="theme"]').forEach((input) => {
+        input.checked = input.value === currentTheme();
+      });
+      dialog.showModal();
+      document.documentElement.style.overflow = "hidden";
     });
-    dialog.showModal();
-    document.documentElement.style.overflow = "hidden";
-  });
 
-  dialog?.addEventListener("close", () => {
-    document.documentElement.style.overflow = "";
-  });
+    dialog.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+    });
 
-  // Backdrop click closes; clicks inside the panel do not.
-  dialog?.addEventListener("click", (event) => {
-    if (event.target === dialog) dialog.close();
-  });
+    // Backdrop click closes; clicks inside the panel do not.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
 
-  dialog?.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
-    button.addEventListener("click", () => dialog.close());
-  });
+    dialog.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
 
-  dialog?.addEventListener("change", (event) => {
-    const input = event.target as HTMLInputElement;
-    if (input.name === "theme" && input.checked) applyTheme(input.value as Theme);
-  });
+    dialog.addEventListener("change", (event) => {
+      const input = event.target as HTMLInputElement;
+      if (input.name === "theme" && input.checked) applyTheme(input.value as Theme);
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
 
   watchSystemTheme();
+
+  // The icon of the theme that just became active spins in — switching themes
+  // reads as a deliberate move, not a picture swap. The <html> element survives
+  // router navigations, so the observer is attached only once.
+  const root = document.documentElement;
+  if (!root.dataset.themeWatch) {
+    root.dataset.themeWatch = "1";
+    let shown = root.dataset.theme;
+    new MutationObserver(() => {
+      const next = root.dataset.theme;
+      if (!next || next === shown) return;
+      shown = next;
+
+      const icon = document.querySelector<HTMLElement>(`[data-theme-icon="${next}"]`);
+      if (!icon || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+      // One frame: the new icon only shows once the theme attribute is set.
+      requestAnimationFrame(() => {
+        if (getComputedStyle(icon).display === "none") return;
+        animate(
+          icon,
+          { rotate: [90, 0], scaleX: [0.6, 1], scaleY: [0.6, 1] },
+          { duration: 0.35, ease: [0.22, 1, 0.36, 1] },
+        );
+      });
+    }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  }
 </script>

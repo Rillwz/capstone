@@ -1,3 +1,10 @@
+## Project context
+
+Read [`compact.md`](./compact.md) whenever a task needs clarity about this project — how
+the motion kit, the Astro Actions, the router and the database fit together, the house
+conventions, and the gotchas. It is the handover document for this repo; keep it current
+when a decision changes.
+
 ## Development
 
 When starting the dev server, use background mode:

@@ -2,7 +2,7 @@
 // Announcement list + reader modal (login page). Two tones so the same component
 // works on the dark brand panel and on the light mobile layout.
 import { ChevronRight, X } from "@lucide/astro";
-import { formatDateTime } from "../lib/format";
+import { formatDateOnly } from "../lib/format";
 
 interface Props {
   posts: Array<{ id: number; title: string; author_name: string; created_at: string; updated_at: string }>;
@@ -17,8 +17,9 @@ const { posts, idPrefix, tone = "light", class: className } = Astro.props;
 const dialogId = `post-dialog-${idPrefix}`;
 const headingId = `post-heading-${idPrefix}`;
 
-const postMeta = (post: Props["posts"][number]) =>
-  `${post.author_name} · ${formatDateTime(post.created_at)}${post.updated_at !== post.created_at ? " · diperbarui" : ""}`;
+// The login screen is public: the list shows when a post went out, not who wrote
+// it and not the hour.
+const postMeta = (post: Props["posts"][number]) => formatDateOnly(post.created_at);
 
 const tones = {
   dark: {
@@ -105,67 +106,80 @@ const tones = {
   // shortcut: markdown bodies come from admin-authored posts and are not sanitized.
   const cache = new Map<number, string>();
 
-  const render = async (dialog: HTMLDialogElement, id: number) => {
-    const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
-    const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
+  // The router swaps the DOM but keeps this module, so the dialogs are wired again on
+  // every astro:page-load.
+  const init = () => {
+    const render = async (dialog: HTMLDialogElement, id: number) => {
+      const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
+      const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
 
-    const cached = cache.get(id);
-    if (cached) {
-      body.innerHTML = cached;
-      body.classList.remove("hidden");
-      status.classList.add("hidden");
-      return;
-    }
+      const cached = cache.get(id);
+      if (cached) {
+        body.innerHTML = cached;
+        body.classList.remove("hidden");
+        status.classList.add("hidden");
+        return;
+      }
 
-    try {
-      const response = await fetch(`/api/posts/${id}`, { headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error(String(response.status));
-      const { html } = (await response.json()) as { html: string };
+      try {
+        const response = await fetch(`/api/posts/${id}`, { headers: { accept: "application/json" } });
+        if (!response.ok) throw new Error(String(response.status));
+        const { html } = (await response.json()) as { html: string };
 
-      cache.set(id, html);
-      body.innerHTML = html;
-      body.classList.remove("hidden");
-      status.classList.add("hidden");
-    } catch {
-      status.textContent = "Gagal memuat pengumuman. Coba lagi.";
+        cache.set(id, html);
+        body.innerHTML = html;
+        body.classList.remove("hidden");
+        status.classList.add("hidden");
+      } catch {
+        status.textContent = "Gagal memuat pengumuman. Coba lagi.";
+        status.classList.remove("hidden");
+      }
+    };
+
+    const open = (dialog: HTMLDialogElement, id: number, title: string, meta: string) => {
+      const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
+      const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
+      dialog.querySelector<HTMLElement>("[data-post-title]")!.textContent = title;
+      dialog.querySelector<HTMLElement>("[data-post-meta]")!.textContent = meta;
+      body.innerHTML = "";
+      body.classList.add("hidden");
+      status.textContent = "Memuat…";
       status.classList.remove("hidden");
-    }
+
+      dialog.showModal();
+      // A modal <dialog> blocks interaction but not page scrolling.
+      document.documentElement.style.overflow = "hidden";
+      void render(dialog, id);
+    };
+
+    document.querySelectorAll<HTMLDialogElement>("dialog.app-dialog").forEach((dialog) => {
+      if (dialog.dataset.postWired) return;
+      dialog.dataset.postWired = "1";
+
+      dialog.addEventListener("close", () => {
+        document.documentElement.style.overflow = "";
+      });
+      // Click on the backdrop (the dialog element itself) closes.
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.querySelectorAll<HTMLButtonElement>("[data-post-close]").forEach((button) => {
+        button.addEventListener("click", () => dialog.close());
+      });
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("[data-post-open]").forEach((button) => {
+      if (button.dataset.postWired) return;
+      button.dataset.postWired = "1";
+
+      button.addEventListener("click", () => {
+        const dialog = document.getElementById(button.dataset.postDialog!) as HTMLDialogElement | null;
+        if (!dialog) return;
+        open(dialog, Number(button.dataset.postOpen), button.dataset.postTitle ?? "", button.dataset.postMeta ?? "");
+      });
+    });
   };
 
-  const open = (dialog: HTMLDialogElement, id: number, title: string, meta: string) => {
-    const body = dialog.querySelector<HTMLElement>("[data-post-body]")!;
-    const status = dialog.querySelector<HTMLElement>("[data-post-status]")!;
-    dialog.querySelector<HTMLElement>("[data-post-title]")!.textContent = title;
-    dialog.querySelector<HTMLElement>("[data-post-meta]")!.textContent = meta;
-    body.innerHTML = "";
-    body.classList.add("hidden");
-    status.textContent = "Memuat…";
-    status.classList.remove("hidden");
-
-    dialog.showModal();
-    // A modal <dialog> blocks interaction but not page scrolling.
-    document.documentElement.style.overflow = "hidden";
-    void render(dialog, id);
-  };
-
-  document.querySelectorAll<HTMLDialogElement>("dialog.app-dialog").forEach((dialog) => {
-    dialog.addEventListener("close", () => {
-      document.documentElement.style.overflow = "";
-    });
-    // Click on the backdrop (the dialog element itself) closes.
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.querySelectorAll<HTMLButtonElement>("[data-post-close]").forEach((button) => {
-      button.addEventListener("click", () => dialog.close());
-    });
-  });
-
-  document.querySelectorAll<HTMLButtonElement>("[data-post-open]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const dialog = document.getElementById(button.dataset.postDialog!) as HTMLDialogElement | null;
-      if (!dialog) return;
-      open(dialog, Number(button.dataset.postOpen), button.dataset.postTitle ?? "", button.dataset.postMeta ?? "");
-    });
-  });
+  document.addEventListener("astro:page-load", init);
+  init();
 </script>

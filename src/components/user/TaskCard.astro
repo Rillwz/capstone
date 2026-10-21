@@ -1,8 +1,10 @@
 ---
 // Satu tugas di ruang kerja user: nama, unit kerja, periode, jatuh tempo, dan tombol
-// centang. Satu form untuk dua aksi — "complete" (tandai selesai) dan "undo" (batalkan).
+// centang. Centangnya memakai Astro Action (lihat src/actions) — jadi tandanya selesai
+// tidak memuat ulang halaman.
 import { Check, Clock } from "@lucide/astro";
 import type { AstroComponent } from "@lucide/astro";
+import TaskNote from "./TaskNote.astro";
 
 interface Props {
   name: string;
@@ -14,32 +16,49 @@ interface Props {
   activityId: number;
   done: boolean;
   late?: boolean;
+  note?: string;
+  link?: string;
+  /** Fallback tanpa JavaScript: halaman dengan dialog catatan terbuka. */
+  noteHref: string;
 }
 
-const { name, unitLabel, unitIcon: UnitIcon, periode, dueText, periodKey, activityId, done, late = false } =
-  Astro.props;
+const {
+  name,
+  unitLabel,
+  unitIcon: UnitIcon,
+  periode,
+  dueText,
+  periodKey,
+  activityId,
+  done,
+  late = false,
+  note = "",
+  link = "",
+  noteHref,
+} = Astro.props;
 ---
 
-<li class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4">
-  <form method="POST" class="shrink-0">
-    <input type="hidden" name="activityId" value={activityId} />
-    <input type="hidden" name="periodKey" value={periodKey} />
-    <button
-      type="submit"
-      name="action"
-      value={done ? "undo" : "complete"}
-      aria-label={done ? `Batalkan tanda selesai: ${name}` : `Tandai selesai: ${name}`}
-      title={done ? "Batalkan tanda selesai" : "Tandai selesai"}
-      class:list={[
-        "grid size-9 place-items-center rounded-full border-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
-        done
-          ? "border-brand-600 bg-brand-600 text-onbrand"
-          : "border-slate-300 bg-white text-slate-300 hover:border-brand-400 hover:text-brand-400",
-      ]}
-    >
-      <Check class="size-4" />
-    </button>
-  </form>
+<li
+  class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4"
+  data-task
+  data-reveal="up"
+  data-done={String(done)}
+  data-name={name}
+  data-activity-id={activityId}
+  data-period-key={periodKey}
+>
+  <button
+    type="button"
+    data-task-toggle
+    data-activity-id={activityId}
+    data-period-key={periodKey}
+    data-state={done ? "done" : "open"}
+    aria-label={done ? `Batalkan tanda selesai: ${name}` : `Tandai selesai: ${name}`}
+    title={done ? "Batalkan tanda selesai" : "Tandai selesai"}
+    class="grid size-9 shrink-0 place-items-center rounded-full border-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+  >
+    <Check class="size-4" />
+  </button>
 
   <div class="min-w-0 flex-1">
     <p class="text-sm font-medium text-slate-900">{name}</p>
@@ -54,18 +73,53 @@ const { name, unitLabel, unitIcon: UnitIcon, periode, dueText, periodKey, activi
         {dueText}
       </span>
     </p>
+
+    <TaskNote
+      activityId={activityId}
+      periodKey={periodKey}
+      name={name}
+      note={note}
+      link={link}
+      noteHref={noteHref}
+    />
   </div>
 
-  {
-    done && (
-      <span
-        class:list={[
-          "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-          late ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700",
-        ]}
-      >
-        {late ? "Terlambat" : "Selesai"}
-      </span>
-    )
-  }
+  <span
+    data-task-badge
+    data-state={done ? (late ? "late" : "done") : "none"}
+    class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+  >
+    {done ? (late ? "Terlambat" : "Selesai") : ""}
+  </span>
 </li>
+
+<style>
+  /* Status kartu: centang dan lencana ditulis lewat data-state, supaya aksi bisa
+     mengubahnya tanpa memuat ulang halaman. Warnanya lewat token tema, jadi ikut
+     berubah bersama tema yang aktif. */
+  [data-task-toggle][data-state="open"] {
+    border-color: var(--color-slate-300);
+    background-color: var(--color-white);
+    color: var(--color-slate-300);
+  }
+  [data-task-toggle][data-state="open"]:hover {
+    border-color: var(--color-brand-400);
+    color: var(--color-brand-400);
+  }
+  [data-task-toggle][data-state="done"] {
+    border-color: var(--color-brand-600);
+    background-color: var(--color-brand-600);
+    color: var(--color-onbrand);
+  }
+  [data-task-badge][data-state="done"] {
+    background-color: var(--color-emerald-50);
+    color: var(--color-emerald-700);
+  }
+  [data-task-badge][data-state="late"] {
+    background-color: var(--color-amber-50);
+    color: var(--color-amber-700);
+  }
+  [data-task-badge][data-state="none"] {
+    display: none;
+  }
+</style>

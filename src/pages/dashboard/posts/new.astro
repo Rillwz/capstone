@@ -1,34 +1,19 @@
 ---
-// New post — markdown editor + live preview.
+// New post — markdown editor + live preview. The save goes through an Astro Action
+// (src/actions), so publishing does not reload the page.
 import PostEditor from "../../../components/admin/PostEditor.astro";
 import DashboardLayout from "../../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../../lib/auth";
-import { createPost } from "../../../lib/db";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
-
-let error: string | undefined;
-let title = "";
-let body = "";
-
-if (Astro.request.method === "POST") {
-  const form = await Astro.request.formData();
-  title = String(form.get("title") ?? "").trim();
-  body = String(form.get("body") ?? "").trim();
-
-  if (!title || !body) {
-    error = "Judul dan isi wajib diisi.";
-  } else {
-    const id = createPost(title, body, Number(session.user.id));
-    return Astro.redirect(`/dashboard/posts/${id}`);
-  }
-}
 ---
 
 <DashboardLayout title="Postingan baru" user={session.user}>
-  <h1 class="text-xl font-semibold text-slate-900">Postingan baru</h1>
-  <p class="mt-1 mb-6 text-sm text-slate-500">Markdown didukung — pratinjau tampil di samping editor.</p>
+  <div data-reveal="up">
+    <h1 class="text-xl font-semibold text-slate-900">Postingan baru</h1>
+    <p class="mt-1 mb-6 text-sm text-slate-500">Markdown didukung — pratinjau tampil di samping editor.</p>
+  </div>
 
-  <PostEditor post={{ title, body }} error={error} submitLabel="Terbitkan" />
+  <PostEditor post={{ title: "", body: "" }} submitLabel="Terbitkan" action="create" />
 </DashboardLayout>

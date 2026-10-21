@@ -2,12 +2,19 @@
 // Riwayat — catatan kemunculan yang sudah lewat: yang diselesaikan, yang diselesaikan
 // terlambat, dan yang tidak sempat dikerjakan. Filter status lewat GET biasa, jadi
 // halamannya tetap jalan tanpa JavaScript.
-import { CalendarRange, CircleCheck, Inbox, TriangleAlert } from "@lucide/astro";
+//
+// Dua aksi lain berlaku di sini: membatalkan tanda selesai (barisnya kembali jadi
+// "terlewat" atau muncul lagi di dashboard), dan menyunting catatan & tautan.
+import { CalendarRange, CircleCheck, Inbox, TriangleAlert, Undo2 } from "@lucide/astro";
+import NoteDialog from "../../components/user/NoteDialog.astro";
+import TaskNote from "../../components/user/TaskNote.astro";
+import Button from "../../components/ui/Button.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireUser } from "../../lib/auth";
 import { findCategory } from "../../lib/categories";
-import { listHistory, materializeOverdue } from "../../lib/db";
+import { listHistory, materializeOverdue, setOccurrenceNote, undoOccurrence } from "../../lib/db";
 import { formatDateTime, formatPeriod } from "../../lib/format";
+import { parseNote } from "../../lib/notes";
 
 const session = await requireUser(Astro);
 if (session instanceof Response) return session;
@@ -17,9 +24,74 @@ if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequir
 
 const filter = Astro.url.searchParams.get("status");
 const status = filter === "selesai" || filter === "terlewat" ? filter : undefined;
+
+// Kemunculan yang lagi disunting catatannya — dialognya dirender terbuka.
+let editingId = 0;
+let editingPeriod = "";
+let editingNote = "";
+let editingLink = "";
+let noteError: string | undefined;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = String(form.get("action") ?? "");
+  const activityId = Number(form.get("activityId"));
+  const periodKey = String(form.get("periodKey") ?? "");
+
+  if (Number.isInteger(activityId) && periodKey) {
+    if (action === "undo") {
+      const undone = undoOccurrence(userId, activityId, periodKey);
+      if (undone) {
+        // Filter statusnya dipertahankan —undo tidak boleh membuat daftar terasa kosong.
+        const query = new URLSearchParams();
+        if (filter) query.set("status", filter);
+        query.set("undone", undone);
+        return Astro.redirect(`/user/riwayat?${query}`);
+      }
+    } else if (action === "note") {
+      const parsed = parseNote(form);
+      if ("error" in parsed) {
+        // Halaman dirender ulang dengan dialog terbuka dan pesan errornya.
+        noteError = parsed.error;
+        editingId = activityId;
+        editingPeriod = periodKey;
+        editingNote = String(form.get("note") ?? "");
+        editingLink = String(form.get("link") ?? "");
+      } else {
+        const removed = setOccurrenceNote(
+          userId,
+          activityId,
+          periodKey,
+          parsed.value.note,
+          parsed.value.link,
+        );
+        return Astro.redirect(`/user/riwayat?${removed ? "cleared" : "noted"}=1`);
+      }
+    }
+  }
+  if (!noteError) return Astro.redirect("/user/riwayat");
+}
+
 // Periode yang lewat tanpa penyelesaian dicatat lebih dulu, biar riwayatnya lengkap.
 materializeOverdue(userId);
 const history = listHistory(userId, status);
+
+if (!editingId) {
+  editingId = Number(Astro.url.searchParams.get("note") ?? 0) || 0;
+  editingPeriod = Astro.url.searchParams.get("period") ?? "";
+}
+const editingTarget = history.find(
+  (row) => row.activity_id === editingId && row.period_key === editingPeriod,
+);
+const editing = editingTarget
+  ? {
+      activityId: editingTarget.activity_id,
+      periodKey: editingTarget.period_key,
+      name: editingTarget.name,
+      note: editingNote || editingTarget.note,
+      link: editingLink || editingTarget.link,
+    }
+  : undefined;
 
 const tabs = [
   { value: undefined, label: "Semua" },
@@ -28,6 +100,9 @@ const tabs = [
 ];
 
 const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
+const undone = Astro.url.searchParams.get("undone");
+const noted = Astro.url.searchParams.has("noted");
+const cleared = Astro.url.searchParams.has("cleared");
 ---
 
 <DashboardLayout title="Riwayat" user={session.user}>
@@ -58,6 +133,45 @@ const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
   </nav>
 
   {
+    undone && (
+      <p
+        data-notice
+        data-notice-params="undone"
+        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
+        role="status"
+      >
+        {undone === "terlewat"
+          ? "Tanda selesai dibatalkan — kemunculan itu kembali tercatat sebagai terlewat."
+          : "Tanda selesai dibatalkan — tugasnya kembali terbuka."}
+      </p>
+    )
+  }
+  {
+    noted && (
+      <p
+        data-notice
+        data-notice-params="noted"
+        class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+        role="status"
+      >
+        Catatan tersimpan.
+      </p>
+    )
+  }
+  {
+    cleared && (
+      <p
+        data-notice
+        data-notice-params="cleared"
+        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
+        role="status"
+      >
+        Catatan dihapus.
+      </p>
+    )
+  }
+
+  {
     history.length === 0 ? (
       <div class="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
         <Inbox class="size-8 text-slate-300" />
@@ -72,7 +186,14 @@ const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
           const category = findCategory(row.category_id);
           const UnitIcon = category?.icon ?? Inbox;
           return (
-            <li class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <li
+              class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4"
+              data-task
+              data-reveal="fade"
+              data-name={row.name}
+              data-activity-id={row.activity_id}
+              data-period-key={row.period_key}
+            >
               <span
                 class:list={[
                   "grid size-9 shrink-0 place-items-center rounded-full",
@@ -105,23 +226,52 @@ const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
                 {row.completed_at && (
                   <p class="mt-1 text-xs text-slate-400">Selesai {formatDateTime(row.completed_at)}</p>
                 )}
+
+                <TaskNote
+                  activityId={row.activity_id}
+                  periodKey={row.period_key}
+                  name={row.name}
+                  note={row.note}
+                  link={row.link}
+                  noteHref={`/user/riwayat?note=${row.activity_id}&period=${encodeURIComponent(row.period_key)}`}
+                />
               </div>
-              <span
-                class:list={[
-                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-                  row.status === "terlewat"
-                    ? "bg-red-50 text-red-700"
-                    : row.late
-                      ? "bg-amber-50 text-amber-700"
-                      : "bg-emerald-50 text-emerald-700",
-                ]}
-              >
-                {row.status === "terlewat" ? "Terlewat" : row.late ? "Terlambat" : "Selesai"}
-              </span>
+
+              <div class="flex shrink-0 flex-col items-end gap-2">
+                <span
+                  class:list={[
+                    "rounded-full px-2 py-0.5 text-xs font-medium",
+                    row.status === "terlewat"
+                      ? "bg-red-50 text-red-700"
+                      : row.late
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-emerald-50 text-emerald-700",
+                  ]}
+                >
+                  {row.status === "terlewat" ? "Terlewat" : row.late ? "Terlambat" : "Selesai"}
+                </span>
+
+                {row.status === "selesai" && (
+                  <form method="POST">
+                    <input type="hidden" name="activityId" value={row.activity_id} />
+                    <input type="hidden" name="periodKey" value={row.period_key} />
+                    <Button variant="ghost" size="sm" type="submit" name="action" value="undo">
+                      <Undo2 class="size-3.5" />
+                      Batalkan
+                    </Button>
+                  </form>
+                )}
+              </div>
             </li>
           );
         })}
       </ul>
     )
   }
+
+  <NoteDialog occurrence={editing} error={noteError} />
 </DashboardLayout>
+
+<script>
+  import "../../scripts/notices.ts";
+</script>
