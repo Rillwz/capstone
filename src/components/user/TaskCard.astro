@@ -19,6 +19,8 @@ interface Props {
   dueToday?: boolean;
   periodKey: string;
   activityId: number;
+  /** Durasi satu pengerjaan, untuk ringkasan sisa waktu hari ini. */
+  minutes?: number;
   done: boolean;
   late?: boolean;
   note?: string;
@@ -39,6 +41,7 @@ const {
   dueToday = false,
   periodKey,
   activityId,
+  minutes = 0,
   done,
   late = false,
   note = "",
@@ -62,6 +65,7 @@ const badgeText = done ? (late ? "Terlambat" : "Selesai") : dueToday ? "Hari ini
   data-name={name}
   data-activity-id={activityId}
   data-period-key={periodKey}
+  data-minutes={minutes}
 >
   <button
     type="button"

@@ -6,7 +6,7 @@ decision changes.
 
 ## What it is
 
-"better-belt" — an assignment tracker for Indonesian government-style work units (satuan
+"umsura-assignment" — an assignment tracker for Indonesian government-style work units (satuan
 kerja). Two roles of end users plus an admin:
 
 - **Admin (role 0)** — `/dashboard`: manage work units (kategori), activity types
@@ -152,6 +152,21 @@ event, not a calendar period.
   `astro:after-swap` restores the theme and the `js` class, because the router replaces
   `<html>` attributes.
 
+## Docked menu rail
+
+The lg+ sidebar (`DashboardLayout`) collapses to a 72px icon rail from
+`DockToggle.astro`. The state is a single attribute, `data-dock-mini` on `<html>`, so
+CSS owns the transition (`[data-dock]` rules in `global.css`) and JS only flips it
+(`src/scripts/dock.ts`, key `assignment-dock`). Three things keep it from flickering:
+
+- the inline head script in `Layout.astro` sets the attribute before first paint;
+- `astro:after-swap` puts it back, because the router replaces `<html>` attributes;
+- the mini rules are scoped to `[data-dock]`, so the mobile drawer (same `SidebarNav`
+  markup) keeps its labels.
+
+In the rail each link keeps a `data-label` that CSS renders as a tooltip on hover/focus;
+the link's `aria-label` carries the same name, so the tooltip is decoration only.
+
 ## Mutations go through Astro Actions
 
 `src/actions/index.ts` holds every mutation. Each action re-checks the session itself
@@ -248,6 +263,29 @@ tooltip and the summary from it. Both actions call `materializeOverdue()`
 first, so the numbers equal what a reload would show (an undone late task
 reappears as a missed period, and its red ring comes back).
 
+## Dashboards
+
+Both overviews answer "what needs doing now" first and keep vanity numbers out of the
+header. They share `src/components/ui/StatCard.astro` (optional `href` makes the whole card
+a link; `meter` fills a progress bar) and `src/components/ui/BarChart.astro` (pure CSS,
+7 bars for logins on the admin side, 14 for completions on the user side).
+
+**`/user`** — the top strip is today only: how many tasks are still open and the estimated
+minutes left (`formatMinutes`). It deliberately does **not** repeat the done ratio, because
+the "Hari ini" group header prints it one screen below. The strip is patched live by
+`refreshTodaySummary()` (called from `refreshGroupCounts`), which recomputes from the
+`data-due-today` cards and flips `data-open` — colour and icon follow that one attribute
+through scoped CSS, so no icon markup is built in JavaScript. Missed periods are one
+divided card (a chip per period), not a wall of red cards. "Ritme 14 hari" holds the
+completion chart plus average, active days and missed; the numbers come from
+`dailyDoneTrend(userId, 14)` and are a **load-time snapshot** (a toggle patches the summary
+and group counters, not this history) — patch it client-side if that ever feels stale.
+
+**`/dashboard`** — opens with a "Perlu perhatian" strip, then four linked stat cards
+(`href` + `meter`), coverage per unit (`listCategoryCoverage`, which skips the
+`penugasan-langsung` system unit), the 7-day login `BarChart` (`loginTrend`, bucketed by
+Jakarta day in JS) and the latest logins/posts.
+
 ## Notable files
 
 | File | Role |
@@ -255,7 +293,10 @@ reappears as a missed period, and its red ring comes back).
 | `src/scripts/motion.ts` | motion kit + toast helpers |
 | `src/scripts/toast.ts` | `toast()` — one panel for every short feedback; tone picks icon + colour |
 | `src/scripts/dashboard.ts` | re-exports `toast()`, adds `refreshPage()` for admin actions |
-| `src/scripts/tasks.ts` | DOM patching for the level-1/2 workspace |
+| `src/scripts/tasks.ts` | DOM patching for the level-1/2 workspace (`setTaskState`, `applyStats`, `refreshTodaySummary`) |
+| `src/lib/format.ts` | `formatDate` (returns "–" on bad input), `formatMinutes`, `graphCellTitle` |
+| `src/components/ui/BarChart.astro` | shared pure-CSS bar chart (admin logins, user rhythm) |
+| `src/components/ui/StatCard.astro` | stat card; `href` links the whole card, `meter` fills a bar |
 | `src/actions/index.ts` | every mutation |
 | `src/lib/notes.ts` | `parseNoteValues`, `parseNote`, `NOTE_MAX`, `linkLabel` |
 | `src/lib/activities.ts` | `parseActivityValues` (plain values), `parseActivity` (FormData) |
@@ -270,6 +311,8 @@ reappears as a missed period, and its red ring comes back).
 | `src/components/user/NoteDialog.astro` | note + link dialog, saves through `saveNote` |
 | `src/components/user/TaskNote.astro` | always rendered (hidden when empty) so actions can fill it in |
 | `src/layouts/Layout.astro` | `html.js` marker, reveal safety net, `astro:after-swap` theme restore |
+| `src/components/admin/DockToggle.astro` | lg+ rail toggle for the docked menu |
+| `src/scripts/dock.ts` | rail state (`data-dock-mini`, `assignment-dock`) |
 
 ## Conventions and gotchas
 
@@ -423,9 +466,14 @@ same thing it did before — the day still anchors the monthly due date.
 
 ## Current state
 
-- Uncommitted: the whole motion/actions rewrite (see `git status`), the `/user` dashboard
-  rework (task list on top, bell opens `InboxDialog`, period filter chips), the
-  `start_date`/`end_date` range migration, and the release confirmation dialog.
+- Uncommitted: the rename to Umsura Assignment, the motion/actions rewrite (see `git
+  status`), both dashboard reworks (see "Dashboards"), the `start_date`/`end_date` range
+  migration, and the release confirmation dialog.
+- The local DB was rebuilt after the dashboard review: the pre-demo snapshot was restored
+  (real users + original admin password), the 11 default units were re-inserted, and
+  `import-mpp.ts` replayed `data/mpp.json`. Result: 12 work units + the `Instruksi` system
+  unit, 204 distinct MPP activities. Screenshots for the review used throwaway
+  `demo.test` accounts that are now gone.
 - Done from the meeting agenda: master Posisi/Jabatan, dynamic kategori, Penugasan Massal,
   Notifikasi Pekerjaan Masuk, Instruksi, plus traceability ("Dari" on the
   recipient side) and the giver's progress tracker with the per-period timeline.

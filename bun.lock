@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "better-belt",
+      "name": "umsura-assignment",
       "dependencies": {
         "@astrojs/node": "^11.1.8",
         "@auth/core": "^0.18.6",

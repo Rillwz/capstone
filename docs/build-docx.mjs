@@ -32,7 +32,7 @@ const pandoc = ["pandoc", `${process.env.HOME}/.local/bin/pandoc`].find((bin) =>
 });
 if (!pandoc) throw new Error("pandoc not found (install pandoc, or put it on PATH)");
 
-const work = mkdtempSync(join(tmpdir(), "better-belt-docx-"));
+const work = mkdtempSync(join(tmpdir(), "umsura-assignment-docx-"));
 const run = (cmd, args, cwd = work) => execFileSync(cmd, args, { cwd, stdio: "pipe" });
 
 /** Set the run properties of one style, adding an <w:rPr> when the style has none. */

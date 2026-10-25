@@ -15,7 +15,7 @@ const { title } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
-    <title>{title} · Better Belt</title>
+    <title>{title} · Umsura Assignment</title>
     <!-- The router turns every form POST into an in-page transition, so actions
          no longer reload the whole page. -->
     <ClientRouter />
@@ -40,6 +40,16 @@ const { title } = Astro.props;
               ? "dark"
               : "light";
         document.documentElement.dataset.theme = theme;
+
+        // The docked menu's rail state, for the same reason: set before first paint
+        // so a reload does not flash the full-width menu and then collapse it.
+        try {
+          if (localStorage.getItem("assignment-dock") === "mini") {
+            document.documentElement.dataset.dockMini = "1";
+          }
+        } catch {
+          // storage blocked — start expanded
+        }
       })();
 
       // Safety net: if the motion bundle never arrives, a reveal block must not
@@ -61,9 +71,14 @@ const { title } = Astro.props;
   // marker have to be put back after every navigation — otherwise the page would
   // come back in the default palette.
   import { preferredTheme } from "../scripts/theme.ts";
+  import { isDockMini } from "../scripts/dock.ts";
 
   document.addEventListener("astro:after-swap", () => {
     document.documentElement.classList.add("js");
     document.documentElement.dataset.theme = preferredTheme();
+    // The router replaces <html>'s attributes, so the rail state is put back before
+    // the new page paints.
+    if (isDockMini()) document.documentElement.dataset.dockMini = "1";
+    else delete document.documentElement.dataset.dockMini;
   });
 </script>

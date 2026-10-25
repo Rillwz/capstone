@@ -1,0 +1,51 @@
+---
+// Rail toggle for the docked dashboard menu (lg+ only). The mini state is a CSS
+// concern (html[data-dock-mini] in global.css); this button only flips it. The
+// visible word is the action, so it doubles as the accessible name.
+import { ChevronDoubleLeft } from "../../lib/icons";
+---
+
+<button
+  type="button"
+  data-dock-toggle
+  aria-label="Sempitkan menu"
+  title="Sempitkan menu"
+  class="mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+>
+  <ChevronDoubleLeft data-dock-toggle-icon class="size-4 shrink-0" />
+  <span data-dock-toggle-label class="truncate">Sempitkan</span>
+</button>
+
+<script>
+  import { isDockMini, setDockMini } from "../../scripts/dock.ts";
+
+  // The router swaps the DOM but keeps this module, so the button is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const toggle = document.querySelector<HTMLButtonElement>("[data-dock-toggle]");
+    if (!toggle || toggle.dataset.dockWired) return;
+    toggle.dataset.dockWired = "1";
+
+    const label = toggle.querySelector<HTMLElement>("[data-dock-toggle-label]");
+
+    const reflect = (mini: boolean) => {
+      const text = mini ? "Lebarkan menu" : "Sempitkan menu";
+      toggle.setAttribute("aria-label", text);
+      toggle.title = text;
+      if (label) label.textContent = mini ? "Lebarkan" : "Sempitkan";
+    };
+
+    reflect(isDockMini());
+
+    toggle.addEventListener("click", () => {
+      // The rail width, the labels and the chevron all move through CSS transitions,
+      // so the button only writes the state.
+      const mini = !isDockMini();
+      setDockMini(mini);
+      reflect(mini);
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

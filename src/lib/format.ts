@@ -37,12 +37,24 @@ export function formatRange(start: string, end: string): string {
 /** A plain civil date ("YYYY-MM-DD") as "20 Okt 2026"; empty means "not set". */
 export function formatDate(value: string): string {
   if (!value) return "–";
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString("id-ID", {
+  const date = new Date(`${value}T00:00:00Z`);
+  // A malformed key (legacy or corrupt row) must not print "Invalid Date" to a user.
+  if (Number.isNaN(date.getTime())) return "–";
+  return date.toLocaleDateString("id-ID", {
     day: "numeric",
     month: "short",
     year: "numeric",
     timeZone: "Asia/Jakarta",
   });
+}
+
+/** A duration in minutes as "±45 menit" / "±2 jam 30 menit". */
+export function formatMinutes(total: number): string {
+  if (total <= 0) return "±0 menit";
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (hours === 0) return `±${minutes} menit`;
+  return minutes === 0 ? `±${hours} jam` : `±${hours} jam ${minutes} menit`;
 }
 
 /** Versi pendek dari formatPeriod, untuk chip: "Minggu 43", "Okt 2026", "Semester 2 2026". */

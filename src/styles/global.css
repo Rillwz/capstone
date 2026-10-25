@@ -290,6 +290,133 @@ html:not([data-theme]) [data-theme-icon="light"] {
   padding: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   Docked menu, mini rail (lg+). One attribute on <html> drives the whole state:
+   the aside narrows, labels collapse, and the icon links centre themselves. The
+   attribute is restored before first paint (see the inline head script in
+   Layout.astro), so a reload never flashes the full menu first.
+   --------------------------------------------------------------------------- */
+[data-dock] {
+  transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-dock-mini] [data-dock] {
+  width: 4.5rem;
+}
+
+[data-dock-label] {
+  /* max-width, not width: the label is a flex child, so a percentage max-width
+     collapses it while the icon keeps its box. */
+  max-width: 100%;
+  transition:
+    max-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease 60ms;
+}
+
+html[data-dock-mini] [data-dock] [data-dock-label] {
+  max-width: 0;
+  opacity: 0;
+  transition:
+    max-width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 100ms ease;
+}
+
+[data-dock-item] {
+  transition:
+    padding 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    gap 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-dock-mini] [data-dock] [data-dock-item] {
+  /* Padding, not justify-content: a justify change snaps while the width is
+     still animating. 1rem + the 16px icon centres it in the 48px content box. */
+  gap: 0;
+  padding-inline: 1rem;
+}
+
+/* The badge pins to the icon's corner instead of taking a column. The icon is
+   centred, so its right edge is 8px past the middle of the row. */
+html[data-dock-mini] [data-dock] [data-dock-badge] {
+  position: absolute;
+  top: 0.5rem;
+  right: auto;
+  left: calc(50% + 0.5rem);
+  min-width: 1rem;
+  padding-inline: 0.2rem;
+  line-height: 1rem;
+}
+
+/* The section word is only a spacer in the rail: keeping its box means the icons
+   do not jump when the state changes. */
+html[data-dock-mini] [data-dock] [data-dock-section],
+html[data-dock-mini] [data-dock] [data-dock-toggle-label] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-dock-toggle] {
+  transition:
+    padding 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    gap 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-dock-mini] [data-dock] [data-dock-toggle] {
+  gap: 0;
+  padding-inline: 1rem;
+}
+
+html[data-dock-mini] [data-dock] [data-dock-toggle-icon] {
+  transform: rotate(180deg);
+}
+
+[data-dock-toggle-icon] {
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-dock-toggle-label] {
+  transition: opacity 140ms ease;
+}
+
+/* Rail tooltip: the visible name the label used to carry, without the native
+   tooltip's second-long delay and without showing in the full state. */
+html[data-dock-mini] [data-dock] [data-dock-item]::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 0.5rem);
+  z-index: 20;
+  padding: 0.3rem 0.55rem;
+  border-radius: 0.5rem;
+  background-color: var(--color-inverse);
+  color: var(--color-oninverse);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-dock-mini] [data-dock] [data-dock-item]:hover::after,
+html[data-dock-mini] [data-dock] [data-dock-item]:focus-visible::after {
+  opacity: 1;
+  transform: none;
+  transition-delay: 260ms; /* no flash while the cursor crosses the rail */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-dock],
+  [data-dock-label],
+  [data-dock-item],
+  [data-dock-toggle-icon],
+  html[data-dock-toggle-label],
+  html[data-dock-mini] [data-dock-item]::after {
+    transition: none;
+  }
+}
+
 /* Countdown bar on a toast with an action (the 5 second delete undo). Set per toast
    by src/scripts/toast.ts, so the animation duration always matches its timer. */
 @keyframes toast-countdown {

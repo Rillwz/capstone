@@ -711,8 +711,21 @@ export interface Stats {
   level2: number;
   logins24h: number;
   neverLoggedIn: number;
+  /** Work units, excluding the "Instruksi" system unit. */
+  categories: number;
+  /** Activity types in real work units, excluding the system unit. */
+  activities: number;
+  /** Activity types carried by at least one person. */
+  assignedActivities: number;
+  /** Non-admin accounts with no assignment at all — they have an empty workspace. */
+  usersWithoutAssignments: number;
 }
 
+/**
+ * One query for the whole admin overview. Every count is scoped the way the
+ * corresponding page scopes it: the "Instruksi" system unit is not a work unit, so its
+ * activities never count as coverage here.
+ */
 export function getStats(): Stats {
   return db
     .prepare(
@@ -723,9 +736,74 @@ export function getStats(): Stats {
          (SELECT count(*) FROM users WHERE role = 1) AS level1,
          (SELECT count(*) FROM users WHERE role = 2) AS level2,
          (SELECT count(*) FROM login_logs WHERE created_at >= datetime('now', '-1 day')) AS logins24h,
-         (SELECT count(*) FROM users u WHERE NOT EXISTS (SELECT 1 FROM login_logs l WHERE l.user_id = u.id)) AS neverLoggedIn`,
+         (SELECT count(*) FROM users u WHERE NOT EXISTS (SELECT 1 FROM login_logs l WHERE l.user_id = u.id)) AS neverLoggedIn,
+         (SELECT count(*) FROM categories WHERE id <> ?) AS categories,
+         (SELECT count(*) FROM activities WHERE category_id <> ?) AS activities,
+         (SELECT count(DISTINCT g.activity_id)
+            FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+           WHERE ac.category_id <> ?) AS assignedActivities,
+         (SELECT count(*) FROM users u
+           WHERE u.role <> 0
+             AND NOT EXISTS (SELECT 1 FROM assignments g WHERE g.user_id = u.id)) AS usersWithoutAssignments`,
     )
-    .get() as Stats;
+    .get(DIRECT_CATEGORY, DIRECT_CATEGORY, DIRECT_CATEGORY) as Stats;
+}
+
+export interface CategoryCoverage {
+  id: string;
+  label: string;
+  icon: string;
+  /** Activity types defined for this unit. */
+  activities: number;
+  /** How many of them are carried by at least one person. */
+  assigned: number;
+  /** Distinct people carrying anything from this unit. */
+  people: number;
+}
+
+/** Per-unit coverage: the whole "where is work still unassigned" question in one read. */
+export function listCategoryCoverage(): CategoryCoverage[] {
+  return db
+    .prepare(
+      `SELECT c.id, c.label, c.icon,
+              count(DISTINCT ac.id) AS activities,
+              count(DISTINCT g.activity_id) AS assigned,
+              count(DISTINCT g.user_id) AS people
+       FROM categories c
+       LEFT JOIN activities ac ON ac.category_id = c.id
+       LEFT JOIN assignments g ON g.activity_id = ac.id
+       WHERE c.id <> ?
+       GROUP BY c.id
+       ORDER BY c.position, c.label COLLATE NOCASE`,
+    )
+    .all(DIRECT_CATEGORY) as CategoryCoverage[];
+}
+
+/**
+ * Successful logins per Jakarta day for the last `days` days, oldest first. Buckets
+ * are built in JS from the UTC timestamp so an early-morning Jakarta login lands on the
+ * day the admin experienced, not the UTC one.
+ */
+export function loginTrend(days = 7): Array<{ date: string; count: number }> {
+  const rows = db
+    .prepare("SELECT created_at FROM login_logs WHERE created_at >= datetime('now', ?)")
+    .all(`-${days} day`) as Array<{ created_at: string }>;
+
+  const buckets = new Map<string, number>();
+  for (const row of rows) {
+    const date = dbDateToIso(row.created_at);
+    buckets.set(date, (buckets.get(date) ?? 0) + 1);
+  }
+
+  const today = new Date(`${todayIso()}T00:00:00Z`);
+  const out: Array<{ date: string; count: number }> = [];
+  for (let back = days - 1; back >= 0; back--) {
+    const day = new Date(today);
+    day.setUTCDate(day.getUTCDate() - back);
+    const date = day.toISOString().slice(0, 10);
+    out.push({ date, count: buckets.get(date) ?? 0 });
+  }
+  return out;
 }
 
 export interface LoginActivity {
@@ -1616,6 +1694,24 @@ export function dailyActivityByYear(
   return out;
 }
 
+/**
+ * Tugas selesai per Jakarta day for the last `days` days, oldest first. Same buckets
+ * `listDailyActivity` uses (completion day for done, due day for missed), so the chart
+ * and the contribution graph never disagree.
+ */
+export function dailyDoneTrend(userId: number, days = 14): Array<{ date: string; count: number }> {
+  const buckets = listDailyActivity(userId).days;
+  const today = new Date(`${todayIso()}T00:00:00Z`);
+  const out: Array<{ date: string; count: number }> = [];
+  for (let back = days - 1; back >= 0; back--) {
+    const day = new Date(today);
+    day.setUTCDate(day.getUTCDate() - back);
+    const date = day.toISOString().slice(0, 10);
+    out.push({ date, count: buckets.get(date)?.done ?? 0 });
+  }
+  return out;
+}
+
 export function listHistory(userId: number, status?: "selesai" | "terlewat"): HistoryRow[] {
   const rows = db
     .prepare(
@@ -1677,10 +1773,12 @@ export function countCompletedBetween(userId: number, fromIso: string, toIso: st
   }).length;
 }
 
-/** Tiga penghitung di dashboard user — dikirim balik oleh action agar DOM-nya sinkron. */
+/**
+ * Penghitung rekap di dashboard user — dikirim balik oleh action agar DOM-nya sinkron.
+ * "Selesai hari ini" tidak ada di sini: angka itu dihitung dari kartu di halaman,
+ * jadi tidak perlu satu pemindaian penugasan penuh setiap kali tugas dicentang.
+ */
 export interface TaskStats {
-  /** "Selesai hari ini" sebagai "2/3". */
-  doneToday: string;
   /** Kemunculan yang terlewat. */
   missed: number;
   /** Tugas yang selesai bulan ini. */
@@ -1689,11 +1787,8 @@ export interface TaskStats {
 
 export function taskStats(userId: number): TaskStats {
   const today = todayIso();
-  const todayItems = listUserOccurrences(userId).filter((item) => item.due === today);
-  const doneToday = todayItems.filter((item) => item.status === "selesai").length;
 
   return {
-    doneToday: `${doneToday}/${todayItems.length}`,
     missed: listMissedTasks(userId).reduce((sum, item) => sum + item.count, 0),
     doneMonth: countCompletedBetween(userId, `${today.slice(0, 7)}-01`, today),
   };

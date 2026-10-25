@@ -11,6 +11,7 @@
 export { default as AcademicCap } from "heroicons/24/outline/academic-cap.svg";
 export { default as ArchiveBox } from "heroicons/24/outline/archive-box.svg";
 export { default as ArrowLeft } from "heroicons/24/outline/arrow-left.svg";
+export { default as ArrowTrendingUp } from "heroicons/24/outline/arrow-trending-up.svg";
 export { default as ArrowLeftOnRectangle } from "heroicons/24/outline/arrow-left-on-rectangle.svg";
 export { default as ArrowPath } from "heroicons/24/outline/arrow-path.svg";
 export { default as ArrowRightOnRectangle } from "heroicons/24/outline/arrow-right-on-rectangle.svg";
@@ -25,10 +26,12 @@ export { default as BuildingLibrary } from "heroicons/24/outline/building-librar
 export { default as CalendarDateRange } from "heroicons/24/outline/calendar-date-range.svg";
 export { default as CalendarDays } from "heroicons/24/outline/calendar-days.svg";
 export { default as ChartBar } from "heroicons/24/outline/chart-bar.svg";
+export { default as PresentationChartBar } from "heroicons/24/outline/presentation-chart-bar.svg";
 export { default as ChatBubbleLeftEllipsis } from "heroicons/24/outline/chat-bubble-left-ellipsis.svg";
 export { default as Check } from "heroicons/24/outline/check.svg";
 export { default as CheckBadge } from "heroicons/24/outline/check-badge.svg";
 export { default as CheckCircle } from "heroicons/24/outline/check-circle.svg";
+export { default as ChevronDoubleLeft } from "heroicons/24/outline/chevron-double-left.svg";
 export { default as ChevronRight } from "heroicons/24/outline/chevron-right.svg";
 export { default as ClipboardDocument } from "heroicons/24/outline/clipboard-document.svg";
 export { default as ClipboardDocumentCheck } from "heroicons/24/outline/clipboard-document-check.svg";
@@ -70,6 +73,7 @@ export { default as Trash } from "heroicons/24/outline/trash.svg";
 export { default as Truck } from "heroicons/24/outline/truck.svg";
 export { default as User } from "heroicons/24/outline/user.svg";
 export { default as UserGroup } from "heroicons/24/outline/user-group.svg";
+export { default as UserMinus } from "heroicons/24/outline/user-minus.svg";
 export { default as UserPlus } from "heroicons/24/outline/user-plus.svg";
 export { default as Users } from "heroicons/24/outline/users.svg";
 export { default as Wallet } from "heroicons/24/outline/wallet.svg";

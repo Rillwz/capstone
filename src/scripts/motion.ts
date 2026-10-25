@@ -27,6 +27,9 @@ const SHAPES: Record<string, RevealShape> = {
   fade: { opacity: [0, 1] },
   left: { opacity: [0, 1], x: [-10, 0] },
   scale: { opacity: [0, 1], scaleX: [0.97, 1], scaleY: [0.97, 1] },
+  // A proportion bar: it fills from its baseline. Opacity is pinned to 1 so the
+  // shared pre-animation `[data-reveal] { opacity: 0 }` cannot leave it invisible.
+  grow: { opacity: [1, 1], scaleX: [0, 1] },
 };
 
 const formatter = new Intl.NumberFormat("id-ID");

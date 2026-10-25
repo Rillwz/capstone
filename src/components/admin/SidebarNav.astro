@@ -13,29 +13,32 @@ const { items, ariaLabel = "Navigasi dasbor", class: className } = Astro.props;
 ---
 
 <nav class:list={[className]} aria-label={ariaLabel}>
-  <p class="px-3 pb-2 text-xs font-medium tracking-wider text-slate-400 uppercase">Menu</p>
+  <p data-dock-section class="px-3 pb-2 text-xs font-medium tracking-wider text-slate-400 uppercase">Menu</p>
   <ul class="space-y-1">
     {
       items.map(({ href, label, icon: Icon, active, badge }) => (
         <li>
           <a
             href={href}
+            data-dock-item
+            data-label={label}
             aria-current={active ? "page" : undefined}
-            aria-label={badge ? `${label}: ${badge} menunggu` : undefined}
+            aria-label={badge ? `${label}: ${badge} menunggu` : label}
             class:list={[
-              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+              "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
               active
                 ? "bg-brand-50 text-brand-700"
                 : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
             ]}
           >
             <Icon class="size-4 shrink-0" />
-            <span class="flex-1">{label}</span>
+            <span data-dock-label class="min-w-0 flex-1 overflow-hidden whitespace-nowrap">{label}</span>
             {
               // Angka notifikasi: aria-label di link sudah memuat jumlahnya, jadi angka
               // merah ini dekoratif bagi pembaca layar.
               badge ? (
                 <span
+                  data-dock-badge
                   aria-hidden="true"
                   class="grid min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-5 text-oninverse"
                 >

@@ -1,17 +1,17 @@
 ---
 title: "Proposal Pengembangan Produk"
-subtitle: "Aplikasi Penugasan Unit Kerja (Better Belt)"
-author: "Tim Pengembang Better Belt"
+subtitle: "Aplikasi Penugasan Unit Kerja (Umsura Assignment)"
+author: "Tim Pengembang Umsura Assignment"
 date: "Oktober 2026"
 lang: id
 ---
 
 # Halaman Pengesahan
 
-Proposal Pengembangan Produk berjudul **"Aplikasi Penugasan Unit Kerja (Better Belt)"**
-disusun sebagai dokumen perencanaan pengembangan produk yang memuat latar belakang,
-rumusan masalah, tujuan, pemilihan solusi dan teknik, skenario pemanfaatan, serta
-kebutuhan sumber daya pengembangan.
+Proposal Pengembangan Produk berjudul **"Aplikasi Penugasan Unit Kerja (Umsura
+Assignment)"** disusun sebagai dokumen perencanaan pengembangan produk yang memuat
+latar belakang, rumusan masalah, tujuan, pemilihan solusi dan teknik, skenario
+pemanfaatan, serta kebutuhan sumber daya pengembangan.
 
 | Jabatan | Nama | NIP | Tanda Tangan | Tanggal |
 | :--- | :--- | :--- | :--- | :--- |
@@ -34,8 +34,9 @@ tidak pernah menjadi sumber penugasan yang otomatis. Akibatnya, aktivitas period
 yang terlambat tidak tercatat, tidak ada bukti siapa mengerjakan apa, dan beban kerja
 tidak pernah terlihat oleh kepala unit kerja.
 
-Proposal ini berkembang melalui pengembangan aplikasi Better Belt, sebuah aplikasi web
-penugasan unit kerja yang menerjemahkan setiap penugasan menjadi kemunculan per periode.
+Proposal ini berkembang melalui pengembangan aplikasi Umsura Assignment, sebuah
+aplikasi web penugasan unit kerja yang menerjemahkan setiap penugasan menjadi kemunculan
+per periode.
 Pengguna melihat tugas hari ini, minggu ini, bulan ini, dan semester ini; periode yang
 berakhir tanpa penyelesaian dicatat otomatis sebagai terlewat sehingga tidak ada
 pekerjaan yang hilang tanpa jejak; tugas yang terlambat tetap dapat diselesaikan dan
@@ -57,8 +58,8 @@ unit kerja fakultas.
 # Kata Pengantar
 
 Segala puji dipanjatkan kepada Tuhan Yang Maha Esa atas terselesaiknya proposal
-pengembangan produk yang berjudul "Aplikasi Penugasan Unit Kerja (Better Belt)". Pada
-kesempatan ini, tim penyusun menyampaikan terima kasih kepada para pembimbing yang
+pengembangan produk yang berjudul "Aplikasi Penugasan Unit Kerja (Umsura Assignment)".
+Pada kesempatan ini, tim penyusun menyampaikan terima kasih kepada para pembimbing yang
 telah memberikan arahan dan pendampingan, kepada kepala unit kerja serta pengelola
 tata usaha yang telah menyediakan data Matriks Aktivitas Unit Kerja dan waktu untuk
 menggali kebutuhan lapangan, serta kepada seluruh anggota tim yang telah bekerja
@@ -109,7 +110,7 @@ bagi proses pemeriksaan.
 
 ## 1.1 Ringkasan Isi Dokumen
 
-Dokumen ini merupakan proposal pengembangan produk **Better Belt**, aplikasi web
+Dokumen ini merupakan proposal pengembangan produk **Umsura Assignment**, aplikasi web
 pengelolaan penugasan kerja berulang pada unit kerja fakultas. Dokumen disusun untuk
 menjawab tiga hal sekaligus: masalah yang hendak diselesaikan, solusi serta teknik
 yang dipilih beserta alasannya, dan sumber daya yang dibutuhkan untuk menjalankan
@@ -168,7 +169,7 @@ Tiga prinsip penggunaan dokumen:
 | Kode | Judul | Lokasi |
 | :--- | :--- | :--- |
 | R-01 | Matriks Aktivitas Unit Kerja (MPP), 11 unit kerja dan 186 jenis aktivitas | `MPP.xlsx`, lembar 1 sampai 11 |
-| R-02 | Kode sumber aplikasi Better Belt, 5.485 baris kode pada 44 berkas | Repositori proyek |
+| R-02 | Kode sumber aplikasi Umsura Assignment, 5.485 baris kode pada 44 berkas | Repositori proyek |
 | R-03 | Panduan pengembangan proyek | `AGENTS.md` |
 | R-04 | Konfigurasi autentikasi dan sesi | `src/auth.config.ts` |
 | R-05 | Skema basis data dan fungsi akses data | `src/lib/db.ts` |
@@ -295,8 +296,8 @@ menjadi banyak.
 
 ### 2.1.4 Solusi yang Diusulkan
 
-Better Belt menyediakan satu aplikasi web yang menyatukan katalog aktivitas, penugasan,
-danbumusan tempat bekerja. Admin menetapkan aktivitas kepada orang; aplikasi
+Umsura Assignment menyediakan satu aplikasi web yang menyatukan katalog aktivitas,
+penugasan, danbumusan tempat bekerja. Admin menetapkan aktivitas kepada orang; aplikasi
 menerjemahkan setiap penugasan menjadi kemunculan per periode sehingga pengguna
 melihat tugas hari ini, minggu ini, bulan ini, dan semester ini. Periode yang berakhir
 tanpa penyelesaian dicatat otomatis sebagai terlewat saat pengguna membuka halaman,
@@ -698,7 +699,7 @@ Tampilkan kelompok: Terlewat, Hari ini, Minggu ini, Bulan ini, Semester ini
 
 ### 2.5.1 Pemangku Kepentingan dan Kebutuhannya
 
-| Pemangku Kepentingan | Kebutuhan Utama | Manfaat dari Better Belt |
+| Pemangku Kepentingan | Kebutuhan Utama | Manfaat dari Umsura Assignment |
 | :--- | :--- | :--- |
 | Kepala Unit Kerja | Melihat sejauh mana tupoksi unit berjalan dan siapa yang tertinggal | Ringkasan status per periode dan riwayat yang dapat ditelusuri |
 | Admin, operator sistem | Menugaskan aktivitas berulang ke banyak orang sekaligus | Penugasan massal dengan katalog MPP sebagai sumber tunggal |
@@ -901,8 +902,8 @@ Rp 1.000.000 per tahun untuk tiga perangkat.
 
 ### 3.2.5 Asumsi dan Batasan
 
-1. Server dipakai bersama dengan layanan kampus lain. Beban Better Belt diperkirakan
-   di bawah 10 persen kapasitas CPU dan penyimpanan.
+1. Server dipakai bersama dengan layanan kampus lain. Beban Umsura Assignment
+   diperkirakan di bawah 10 persen kapasitas CPU dan penyimpanan.
 2. Ukuran basis data untuk sebelas unit kerja dengan 186 jenis aktivitas berada di bawah
    100 MB, sehingga penyimpanan 500 GB memberi ruang untuk salinan harian selama
    bertahun-tahun.
@@ -1080,9 +1081,9 @@ dianggarkan dalam anggaran operasional tahun pertama.
 
 # 4. Kesimpulan
 
-Proposal ini menghasilkan sebuah produk bernama Better Belt, aplikasi penugasan unit
-kerja yang mengubah MPP, yaitu sebelas unit kerja dengan 186 jenis aktivitas berulang,
-dari dokumen spreadsheet menjadi sistem kerja yang dapat diaudit.
+Proposal ini menghasilkan sebuah produk bernama Umsura Assignment, aplikasi penugasan
+unit kerja yang mengubah MPP, yaitu sebelas unit kerja dengan 186 jenis aktivitas
+berulang, dari dokumen spreadsheet menjadi sistem kerja yang dapat diaudit.
 
 Empat hal tercermin dari naskah ini.
 

@@ -2,11 +2,9 @@
 // is patched to match. Nothing re-renders, so the scroll position stays where the
 // visitor left it and the cards keep their identity.
 
-import { graphCellTitle } from "../lib/format";
+import { formatMinutes, graphCellTitle } from "../lib/format";
 
 export interface TaskStats {
-  /** "Selesai hari ini" sebagai "2/3". */
-  doneToday: string;
   missed: number;
   doneMonth: number;
 }
@@ -98,15 +96,21 @@ export function setTaskPending(card: HTMLElement | null, pending: boolean) {
   else card.removeAttribute("aria-busy");
 }
 
-/** Menulis tiga penghitung dari jawaban server. */
+/** Menulis penghitung rekap dari jawaban server. */
 export function applyStats(stats: TaskStats, root: ParentNode = document) {
   const set = (name: string, value: string) => {
     const element = root.querySelector<HTMLElement>(`[data-stat="${name}"]`);
     if (element) element.textContent = value;
   };
-  set("done-today", stats.doneToday);
   set("missed", String(stats.missed));
   set("done-month", String(stats.doneMonth));
+
+  // The missed counter is the only one whose colour carries meaning, and it changes
+  // after a chip is cleared — so the tone is set here, not once at render time.
+  root.querySelectorAll<HTMLElement>('[data-stat="missed"]').forEach((element) => {
+    element.classList.toggle("text-red-700", stats.missed > 0);
+    element.classList.toggle("text-slate-900", stats.missed === 0);
+  });
 }
 
 /** Menghitung ulang "x/y selesai" dan bar kemajuan tiap kelompok dari kartu-kartunya. */
@@ -117,12 +121,42 @@ export function refreshGroupCounts(root: ParentNode = document) {
     setProgress(group, done, cards.length);
   });
 
-  // Bilah "Kemajuan" di kepala halaman menghitung semua kartu, bukan satu kelompok.
-  root.querySelectorAll<HTMLElement>("[data-overall]").forEach((overall) => {
-    const cards = [...root.querySelectorAll<HTMLElement>("[data-task]")];
-    const done = cards.filter((card) => card.dataset.done === "true").length;
-    setProgress(overall, done, cards.length);
-  });
+  refreshTodaySummary(root);
+}
+
+/**
+ * Ringkasan "hari ini" di kepala halaman. Dihitung dari kartu yang jatuh tempo hari
+ * ini, bukan dari kelompok — satu tugas harian dan satu tugas triwulan bisa sama-sama
+ * jatuh tempo hari ini.
+ */
+export function refreshTodaySummary(root: ParentNode = document) {
+  const summary = root.querySelector<HTMLElement>("[data-today-summary]");
+  if (!summary) return;
+
+  const cards = [...root.querySelectorAll<HTMLElement>('[data-task][data-due-today="true"]')];
+  const open = cards.filter((card) => card.dataset.done !== "true");
+  const done = cards.length - open.length;
+  const minutes = open.reduce((sum, card) => sum + Number(card.dataset.minutes ?? 0), 0);
+
+  // Warna dan ikon mengikuti atribut ini lewat CSS, jadi hanya satu hal yang ditulis.
+  summary.dataset.open = String(open.length);
+
+  const title = summary.querySelector<HTMLElement>("[data-summary-title]");
+  if (title) {
+    title.textContent = open.length > 0 ? `${open.length} tugas belum selesai` : "Tugas hari ini beres";
+  }
+
+  const detail = summary.querySelector<HTMLElement>("[data-summary-detail]");
+  if (detail) {
+    // Only the time budget while work remains: the "Hari ini" group header right below
+    // already prints the done ratio, so repeating it here is noise.
+    detail.textContent =
+      open.length > 0
+        ? minutes > 0
+          ? `${formatMinutes(minutes)} lagi`
+          : `${done}/${cards.length} selesai`
+        : `${done}/${cards.length} tugas selesai`;
+  }
 }
 
 /** "3/8 selesai" + lebar bar. Dipakai per kelompok dan untuk bilah hari ini. */

@@ -1,0 +1,43 @@
+---
+// A small bar chart for the overviews (7-day logins, 14-day completions). Pure CSS:
+// each bar grows from its baseline on reveal, so no chart library ships to the client.
+// `values` are already in display order, oldest first.
+interface Props {
+  label: string;
+  values: Array<{ label: string; value: number; title?: string }>;
+  class?: string;
+}
+
+const { label, values, class: className } = Astro.props;
+
+const max = Math.max(1, ...values.map((item) => item.value));
+const total = values.reduce((sum, item) => sum + item.value, 0);
+---
+
+<figure class:list={["min-w-0", className]}>
+  <figcaption class="sr-only">{label}</figcaption>
+  <div class="flex h-28 items-end gap-1.5" role="img" aria-label={`${label}: ${total} total`}>
+    {
+      values.map((item) => (
+        <div class="group/bar flex h-full min-w-0 flex-1 flex-col justify-end">
+          <span class="mb-1 text-center text-[10px] font-medium text-slate-500 tabular-nums opacity-0 transition-opacity group-hover/bar:opacity-100 group-focus-within/bar:opacity-100">
+            {item.value}
+          </span>
+          <div
+            class:list={[
+              "w-full rounded-t-sm transition-colors motion-reduce:transition-none",
+              // A zero day is a baseline tick, not a tiny bar — 2px of brand colour
+              // would read as "one login".
+              item.value === 0 ? "bg-slate-200" : "bg-brand-400 group-hover/bar:bg-brand-600",
+            ]}
+            style={`height: ${item.value === 0 ? 2 : Math.max(4, Math.round((item.value / max) * 100))}%`}
+            title={item.title ?? `${item.label}: ${item.value}`}
+          />
+        </div>
+      ))
+    }
+  </div>
+  <div class="mt-2 flex gap-1.5" aria-hidden="true">
+    {values.map((item) => <span class="min-w-0 flex-1 truncate text-center text-[10px] text-slate-500">{item.label}</span>)}
+  </div>
+</figure>
