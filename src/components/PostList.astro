@@ -1,7 +1,7 @@
 ---
 // Announcement list + reader modal (login page). Two tones so the same component
 // works on the dark brand panel and on the light mobile layout.
-import { ChevronRight, X } from "@lucide/astro";
+import { ChevronRight, XMark } from "../lib/icons";
 import { formatDateOnly } from "../lib/format";
 
 interface Props {
@@ -91,7 +91,7 @@ const tones = {
       aria-label="Tutup"
       class="-mr-1 shrink-0 rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
     >
-      <X class="size-5" />
+      <XMark class="size-5" />
     </button>
   </div>
 

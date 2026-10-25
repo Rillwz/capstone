@@ -262,22 +262,6 @@ export function scrollProgress(root: ParentNode = document) {
   });
 }
 
-/** Toast: comes in from below. */
-export function showToast(toast: HTMLElement) {
-  toast.hidden = false;
-  if (reduced()) return;
-  animate(toast, { opacity: [0, 1], y: [16, 0] }, { type: "spring", stiffness: 420, damping: 30 });
-}
-
-/** Toast: goes back down. */
-export function hideToast(toast: HTMLElement) {
-  if (reduced()) {
-    toast.hidden = true;
-    return;
-  }
-  animate(toast, { opacity: 0, y: 12 }, { duration: 0.18, ease: EASE_IN, onComplete: () => (toast.hidden = true) });
-}
-
 // Everything that can wire itself up as soon as the page is ready.
 //
 // Astro's router swaps the DOM but keeps this module cached, so the wiring has to be

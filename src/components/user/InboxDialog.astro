@@ -1,0 +1,223 @@
+---
+// Lonceng "Pekerjaan masuk" sebagai modal.
+//
+// Lonceng di header membuka dialog ini di tempat, jadi daftarnya bisa dibaca dari
+// halaman mana pun tanpa kehilangan posisi scroll. Daftarnya penugasan yang belum
+// dibaca — satuannya penugasan, bukan kemunculan: tugas harian tidak boleh membunyikan
+// lonceng setiap hari.
+//
+// Tanpa JavaScript loncengnya tetap sebuah link ke /user?inbox=1, dan halaman itu
+// merender dialog ini sudah terbuka (datanya dirender server) — pola yang sama dengan
+// NoteDialog.
+import { Bell, Check, Inbox, User, XMark } from "../../lib/icons";
+import Button from "../ui/Button.astro";
+import { findCategory } from "../../lib/categories";
+import { formatDateTime } from "../../lib/format";
+import type { NewAssignment } from "../../lib/db";
+
+interface Props {
+  items: NewAssignment[];
+  /** Dibuka dari server (?inbox=1) — jalur tanpa JavaScript. */
+  open?: boolean;
+}
+
+const { items, open = false } = Astro.props;
+---
+
+<dialog
+  id="inbox-dialog"
+  class="app-dialog w-[calc(100vw-2rem)] max-w-lg"
+  aria-labelledby="inbox-dialog-title"
+  open={open}
+  data-open={open ? "" : undefined}
+>
+  <div class="flex max-h-[min(36rem,calc(100dvh-3rem))] flex-col">
+    <header class="flex items-start gap-3 border-b border-slate-200 p-5">
+      <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600">
+        <Bell class="size-4" />
+      </span>
+      <div class="min-w-0 flex-1">
+        <h2 id="inbox-dialog-title" class="text-base font-semibold text-slate-900">Pekerjaan masuk</h2>
+        <p data-inbox-summary class="mt-0.5 text-xs text-slate-500">
+          {items.length > 0
+            ? `${items.length} penugasan baru untuk Anda.`
+            : "Tidak ada penugasan baru."}
+        </p>
+      </div>
+      <button
+        type="button"
+        data-dialog-close
+        aria-label="Tutup"
+        class="-mt-1 -mr-1 grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <XMark class="size-4" />
+      </button>
+    </header>
+
+    <ul
+      data-inbox-list
+      hidden={items.length === 0}
+      class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain"
+    >
+      {
+        items.map((item) => {
+          const category = findCategory(item.category_id);
+          const UnitIcon = category?.icon ?? Inbox;
+          return (
+            <li class="flex items-start gap-3 px-5 py-3.5">
+              <UnitIcon class="mt-0.5 size-4 shrink-0 text-slate-400" />
+              <div class="min-w-0 flex-1">
+                <p class="text-sm leading-snug font-medium break-words text-slate-900">{item.name}</p>
+                <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{item.periode}</span>
+                  <span class="min-w-0 truncate">{category?.label ?? item.category_id}</span>
+                  <span aria-hidden="true" class="text-slate-300">·</span>
+                  <span>{formatDateTime(item.created_at)}</span>
+                </p>
+                {item.giver_name && (
+                  <p class="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                    <User class="size-3.5 shrink-0 text-slate-400" />
+                    <span class="shrink-0">Dari</span>
+                    <span class="min-w-0 truncate font-medium text-slate-600">{item.giver_name}</span>
+                    {item.giver_email && (
+                      <>
+                        <span aria-hidden="true" class="shrink-0 text-slate-300">·</span>
+                        <span class="min-w-0 truncate text-slate-400" title={item.giver_email}>
+                          {item.giver_email}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+            </li>
+          );
+        })
+      }
+    </ul>
+
+    <div
+      data-inbox-empty
+      hidden={items.length > 0}
+      class="flex flex-col items-center gap-1.5 px-6 py-12 text-center"
+    >
+      <Inbox class="size-8 text-slate-300" />
+      <p class="text-sm font-medium text-slate-900">Semua sudah dibaca</p>
+      <p class="text-sm text-slate-500">Penugasan baru akan muncul di sini.</p>
+    </div>
+
+    <footer class="flex flex-col-reverse gap-2 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-end">
+      <p data-inbox-error hidden role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+      <Button variant="outline" type="button" data-dialog-close>Tutup</Button>
+      {
+        items.length > 0 && (
+          // Fallback tanpa JavaScript: form biasa ke /user, yang menandai lalu kembali
+          // ke halaman ini dengan dialognya terbuka dalam keadaan kosong.
+          <form method="POST" action="/user" data-inbox-form>
+            <input type="hidden" name="action" value="seen" />
+            <Button type="submit" data-inbox-seen>
+              <Check class="size-4" />
+              Tandai sudah dibaca
+            </Button>
+          </form>
+        )
+      }
+    </footer>
+  </div>
+</dialog>
+
+<script>
+  import { actions } from "astro:actions";
+  import { clearBell } from "../../scripts/tasks.ts";
+
+  // The router swaps the DOM but keeps this module, so the dialog is wired again on
+  // every astro:page-load.
+  const init = () => {
+    const dialog = document.getElementById("inbox-dialog") as HTMLDialogElement | null;
+    if (!dialog || dialog.dataset.inboxWired) return;
+    dialog.dataset.inboxWired = "1";
+
+    const trigger = document.querySelector<HTMLElement>("[data-inbox-open]");
+    const summary = dialog.querySelector<HTMLElement>("[data-inbox-summary]");
+    const errorBox = dialog.querySelector<HTMLElement>("[data-inbox-error]");
+    const list = dialog.querySelector<HTMLUListElement>("ul");
+
+    const open = () => {
+      if (errorBox) errorBox.hidden = true;
+      // Dialog yang sudah dirender terbuka dari server (?inbox=1) tidak boleh
+      // dipanggil showModal lagi — showModal pada <dialog open> melempar error.
+      if (!dialog.open) dialog.showModal();
+      // A modal <dialog> blocks interaction but not page scrolling.
+      document.documentElement.style.overflow = "hidden";
+      trigger?.setAttribute("aria-expanded", "true");
+    };
+
+    trigger?.addEventListener("click", (event) => {
+      // Tanpa JavaScript href-nya yang dipakai; dengan JavaScript dialognya di sini.
+      event.preventDefault();
+      open();
+    });
+
+    dialog.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+      trigger?.setAttribute("aria-expanded", "false");
+    });
+    // Click on the backdrop (the dialog element itself) closes.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
+
+    // Simpan lewat Astro Action: loncengnya padam tanpa memuat ulang halaman. Form-nya
+    // tetap ada sebagai jalur tanpa JavaScript.
+    const form = dialog.querySelector<HTMLFormElement>("[data-inbox-form]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector<HTMLButtonElement>("[data-inbox-seen]");
+      if (errorBox) errorBox.hidden = true;
+      if (button) button.disabled = true;
+
+      const { error } = await actions.markAssignmentsSeen({});
+      if (button) button.disabled = false;
+
+      if (error) {
+        if (errorBox) {
+          errorBox.textContent = error.message || "Gagal menandai pekerjaan masuk.";
+          errorBox.hidden = false;
+        }
+        return;
+      }
+
+      // Lonceng berhenti berdering, lalu dialognya berganti ke keadaan "kosong".
+      clearBell();
+      form.remove();
+      list?.setAttribute("hidden", "");
+      dialog.querySelector<HTMLElement>("[data-inbox-empty]")?.removeAttribute("hidden");
+      if (summary) summary.textContent = "Tidak ada penugasan baru.";
+    });
+
+    // Datang dari halaman tanpa JavaScript: dialognya sudah dirender terbuka. Dengan
+    // JavaScript, atribut open dilepas dulu supaya bisa dijadikan modal sungguhan.
+    if (dialog.dataset.open !== undefined) {
+      dialog.removeAttribute("open");
+      open();
+    }
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>
+
+<style>
+  /* Jalur tanpa JavaScript (?inbox=1): <dialog open> bukan modal, jadi ia berada di
+     aliran dokumen. Ditaruh fixed di tengah supaya tetap terbaca sebagai dialog, bukan
+     kartu yang mendorong halaman. Dengan JavaScript dialognya modal sungguhan. */
+  #inbox-dialog[data-open] {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    height: fit-content;
+  }
+</style>

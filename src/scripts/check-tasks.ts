@@ -4,6 +4,7 @@
  * calendar edges are checked here instead of in the browser.
  */
 import {
+  activePeriod,
   currentPeriod,
   currentPeriodKey,
   daysBetween,
@@ -146,6 +147,27 @@ check("periodFromKey tahunan", periodFromKey("Tahunan", "2026"), {
   start: "2026-01-01",
   end: "2026-12-31",
 });
+
+// --- rentang berlaku (start_date / end_date) ---
+check("tenggat memotong periode lampau", pastPeriods("Bulanan", "2026-07-15", currentPeriod("Bulanan", "2026-10-20"), "2026-08-20").map((p) => p.key), [
+  "2026-07",
+  "2026-08",
+]);
+check("tenggat sebelum periode pertama", pastPeriods("Bulanan", "2026-07-15", currentPeriod("Bulanan", "2026-10-20"), "2026-06-30").map((p) => p.key), []);
+check(
+  "jatuh tempo dipotong tenggat",
+  dueDate("Bulanan", currentPeriod("Bulanan", "2026-10-20"), "2026-10-05", "2026-10-03"),
+  "2026-10-03",
+);
+check("jatuh tempo ikut hari mulai", dueDate("Bulanan", currentPeriod("Bulanan", "2026-10-20"), "2026-11-05"), "2026-10-05");
+check(
+  "aktif di dalam rentang",
+  activePeriod("Bulanan", "2026-10-20", { start: "2026-10-01", end: "2026-12-31" })?.key,
+  "2026-10",
+);
+check("belum mulai", activePeriod("Bulanan", "2026-10-20", { start: "2026-11-01", end: "" }), null);
+check("sudah lewat tenggat", activePeriod("Bulanan", "2026-10-20", { start: "", end: "2026-10-19" }), null);
+check("tanpa tenggat tetap berjalan", activePeriod("Bulanan", "2026-10-20", { start: "", end: "" })?.key, "2026-10");
 
 // --- misc ---
 check("selisih hari", daysBetween("2026-10-20", "2026-10-25"), 5);

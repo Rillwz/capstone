@@ -2,7 +2,7 @@
 // Text input with label + error, used inside forms. Password inputs get a show/hide
 // toggle; the button carries its own label and aria-pressed state, the script below
 // does the type switch.
-import { Eye, EyeOff } from "@lucide/astro";
+import { Eye, EyeSlash } from "../../lib/icons";
 
 interface Props {
   label: string;
@@ -74,7 +74,7 @@ const isPassword = type === "password";
           class="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-400 transition-colors hover:text-slate-900 focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
           <Eye class="size-4" />
-          <EyeOff class="hidden size-4" />
+          <EyeSlash class="hidden size-4" />
         </button>
       )
     }

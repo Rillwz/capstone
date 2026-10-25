@@ -52,7 +52,10 @@ db.transaction(() => {
   for (const row of rows) {
     const parsed = parseActivityValues({
       name: row.name,
-      day: row.day,
+      // MPP hanya menyimpan hari; rentang mulai & tenggat dibiarkan kosong supaya
+      // aktivitas itu berlaku sejak penugasan dibuat dan berulang tanpa batas.
+      start_date: "",
+      end_date: "",
       utama: row.utama,
       periodik: row.periodik,
       bukan_tupoksi: row.bukan_tupoksi,

@@ -66,7 +66,7 @@ async function currentAdminId(context: ActionAPIContext): Promise<number> {
 }
 
 /**
- * Siapa yang boleh memberikan penugasan langsung: admin (level 0) dan atasan (level 1).
+ * Siapa yang boleh memberikan instruksi: admin (level 0) dan atasan (level 1).
  * Level 2 tidak pernah boleh menugaskan.
  */
 async function currentAssigner(context: ActionAPIContext): Promise<{ id: number; role: number }> {
@@ -164,8 +164,8 @@ export const server = {
       activityIds: z.array(z.number().int().positive()).min(1),
     }),
     handler: async (input, context) => {
-      await currentAdminId(context);
-      const added = createAssignments(input.userId, input.activityIds);
+      const adminId = await currentAdminId(context);
+      const added = createAssignments(input.userId, input.activityIds, adminId);
       return { added };
     },
   }),
@@ -177,8 +177,8 @@ export const server = {
       activityIds: z.array(z.number().int().positive()).min(1).max(500),
     }),
     handler: async (input, context) => {
-      await currentAdminId(context);
-      const added = createAssignmentsBulk(input.userIds, input.activityIds);
+      const adminId = await currentAdminId(context);
+      const added = createAssignmentsBulk(input.userIds, input.activityIds, adminId);
       return { added, skipped: input.userIds.length * input.activityIds.length - added };
     },
   }),
@@ -219,7 +219,7 @@ export const server = {
   }),
 
   // -------------------------------------------------------------------------
-  // Penugasan Langsung: admin & level 1.
+  // Instruksi: admin & level 1.
   // -------------------------------------------------------------------------
 
   /**
@@ -229,7 +229,8 @@ export const server = {
   createDirectAssignment: defineAction({
     input: z.object({
       name: z.string().min(3).max(500),
-      day: z.number().int().min(0).max(31),
+      start_date: z.string().max(10),
+      end_date: z.string().max(10),
       utama: z.boolean(),
       periodik: z.boolean(),
       bukan_tupoksi: z.boolean(),
@@ -237,26 +238,23 @@ export const server = {
       frequency: z.number().int().min(1).max(9999),
       minutes: z.number().int().min(1).max(9999),
       sdm: z.number().int().min(1).max(999),
-      month: z.string().length(7).optional(),
       userIds: z.array(z.number().int().positive()).min(1).max(200),
     }),
     handler: async (input, context) => {
       const assigner = await currentAssigner(context);
 
-      const parsed = parseActivityValues(
-        {
-          name: input.name,
-          day: input.day,
-          utama: input.utama,
-          periodik: input.periodik,
-          bukan_tupoksi: input.bukan_tupoksi,
-          periode: input.periode,
-          frequency: input.frequency,
-          minutes: input.minutes,
-          sdm: input.sdm,
-        },
-        input.month,
-      );
+      const parsed = parseActivityValues({
+        name: input.name,
+        start_date: input.start_date,
+        end_date: input.end_date,
+        utama: input.utama,
+        periodik: input.periodik,
+        bukan_tupoksi: input.bukan_tupoksi,
+        periode: input.periode,
+        frequency: input.frequency,
+        minutes: input.minutes,
+        sdm: input.sdm,
+      });
       if ("error" in parsed) {
         throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
       }
@@ -275,7 +273,7 @@ export const server = {
     },
   }),
 
-  /** Lepas satu penugasan langsung; hanya yang memang diberikan sesi ini. */
+  /** Lepas satu instruksi; hanya yang memang diberikan sesi ini. */
   removeDirectAssignment: defineAction({
     input: z.object({ id: z.number().int().positive() }),
     handler: async (input, context) => {
@@ -338,6 +336,13 @@ export const server = {
       // Mengubah level akun sendiri bisa mengunci admin keluar dari halaman ini.
       if (input.id === adminId && input.role !== 0) {
         throw new ActionError({ code: "FORBIDDEN", message: "Level akun sendiri tidak bisa diturunkan." });
+      }
+      // Level admin juga terkunci untuk akun admin lain: UI-nya disabled, dan ini batas
+      // kepercayaannya. Menurunkan admin terakhir akan menutup seluruh area admin.
+      const target = getUserById(input.id);
+      if (!target) throw new ActionError({ code: "NOT_FOUND", message: "Pengguna tidak ditemukan." });
+      if (target.role === 0 && input.role !== 0) {
+        throw new ActionError({ code: "FORBIDDEN", message: "Level akun admin tidak bisa diubah." });
       }
       const email = input.email.toLowerCase();
       try {
@@ -425,7 +430,8 @@ export const server = {
       categoryId: z.string().min(1).max(60),
       id: z.number().int().positive().optional(),
       name: z.string().min(3).max(500),
-      day: z.number().int().min(0).max(31),
+      start_date: z.string().max(10),
+      end_date: z.string().max(10),
       utama: z.boolean(),
       periodik: z.boolean(),
       bukan_tupoksi: z.boolean(),
@@ -433,25 +439,21 @@ export const server = {
       frequency: z.number().int().min(1).max(9999),
       minutes: z.number().int().min(1).max(9999),
       sdm: z.number().int().min(1).max(999),
-      /** "YYYY-MM" baris yang disunting — baris lamabring bulan sendiri. */
-      month: z.string().length(7).optional(),
     }),
     handler: async (input, context) => {
       await currentAdminId(context);
-      const parsed = parseActivityValues(
-        {
-          name: input.name,
-          day: input.day,
-          utama: input.utama,
-          periodik: input.periodik,
-          bukan_tupoksi: input.bukan_tupoksi,
-          periode: input.periode,
-          frequency: input.frequency,
-          minutes: input.minutes,
-          sdm: input.sdm,
-        },
-        input.month,
-      );
+      const parsed = parseActivityValues({
+        name: input.name,
+        start_date: input.start_date,
+        end_date: input.end_date,
+        utama: input.utama,
+        periodik: input.periodik,
+        bukan_tupoksi: input.bukan_tupoksi,
+        periode: input.periode,
+        frequency: input.frequency,
+        minutes: input.minutes,
+        sdm: input.sdm,
+      });
       if ("error" in parsed) {
         throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
       }

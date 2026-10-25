@@ -5,10 +5,11 @@
 //
 // Dua aksi lain berlaku di sini: membatalkan tanda selesai (barisnya kembali jadi
 // "terlewat" atau muncul lagi di dashboard), dan menyunting catatan & tautan.
-import { CalendarRange, CircleCheck, Inbox, TriangleAlert, Undo2 } from "@lucide/astro";
+import { CalendarDateRange, CheckCircle, Inbox, ExclamationTriangle, ArrowUturnLeft } from "../../lib/icons";
 import NoteDialog from "../../components/user/NoteDialog.astro";
 import TaskNote from "../../components/user/TaskNote.astro";
 import Button from "../../components/ui/Button.astro";
+import ToastFlash from "../../components/ui/ToastFlash.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireUser } from "../../lib/auth";
 import { findCategory } from "../../lib/categories";
@@ -134,42 +135,19 @@ const cleared = Astro.url.searchParams.has("cleared");
 
   {
     undone && (
-      <p
-        data-notice
-        data-notice-params="undone"
-        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
-        role="status"
-      >
-        {undone === "terlewat"
-          ? "Tanda selesai dibatalkan — kemunculan itu kembali tercatat sebagai terlewat."
-          : "Tanda selesai dibatalkan — tugasnya kembali terbuka."}
-      </p>
+      <ToastFlash
+        tone="info"
+        params="undone"
+        message={
+          undone === "terlewat"
+            ? "Tanda selesai dibatalkan — kemunculan itu kembali tercatat sebagai terlewat."
+            : "Tanda selesai dibatalkan — tugasnya kembali terbuka."
+        }
+      />
     )
   }
-  {
-    noted && (
-      <p
-        data-notice
-        data-notice-params="noted"
-        class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-        role="status"
-      >
-        Catatan tersimpan.
-      </p>
-    )
-  }
-  {
-    cleared && (
-      <p
-        data-notice
-        data-notice-params="cleared"
-        class="notice mt-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
-        role="status"
-      >
-        Catatan dihapus.
-      </p>
-    )
-  }
+  {noted && <ToastFlash message="Catatan tersimpan." params="noted" />}
+  {cleared && <ToastFlash tone="info" message="Catatan dihapus." params="cleared" />}
 
   {
     history.length === 0 ? (
@@ -205,9 +183,9 @@ const cleared = Astro.url.searchParams.has("cleared");
                 ]}
               >
                 {row.status === "terlewat" ? (
-                  <TriangleAlert class="size-4" />
+                  <ExclamationTriangle class="size-4" />
                 ) : (
-                  <CircleCheck class="size-4" />
+                  <CheckCircle class="size-4" />
                 )}
               </span>
               <div class="min-w-0 flex-1">
@@ -219,7 +197,7 @@ const cleared = Astro.url.searchParams.has("cleared");
                   </span>
                   <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{row.periode}</span>
                   <span class="inline-flex items-center gap-1">
-                    <CalendarRange class="size-3.5" />
+                    <CalendarDateRange class="size-3.5" />
                     {formatPeriod(row.periode, row.period_key)}
                   </span>
                 </p>
@@ -256,7 +234,7 @@ const cleared = Astro.url.searchParams.has("cleared");
                     <input type="hidden" name="activityId" value={row.activity_id} />
                     <input type="hidden" name="periodKey" value={row.period_key} />
                     <Button variant="ghost" size="sm" type="submit" name="action" value="undo">
-                      <Undo2 class="size-3.5" />
+                      <ArrowUturnLeft class="size-3.5" />
                       Batalkan
                     </Button>
                   </form>
@@ -271,7 +249,3 @@ const cleared = Astro.url.searchParams.has("cleared");
 
   <NoteDialog occurrence={editing} error={noteError} />
 </DashboardLayout>
-
-<script>
-  import "../../scripts/notices.ts";
-</script>

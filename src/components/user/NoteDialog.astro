@@ -4,7 +4,7 @@
 // Bukaannya dua arah: tanpa JavaScript, halaman datang dengan ?note=&period= dan
 // dialog ini sudah terbuka (datanya dirender server); dengan JavaScript, tombol
 // "+" intercepted dan dialognya dibuka di tempat.
-import { X } from "@lucide/astro";
+import { XMark } from "../../lib/icons";
 import Button from "../ui/Button.astro";
 import { NOTE_MAX } from "../../lib/notes";
 
@@ -47,7 +47,7 @@ const { occurrence, error } = Astro.props;
         aria-label="Tutup"
         class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
       >
-        <X class="size-4" />
+        <XMark class="size-4" />
       </button>
     </div>
 

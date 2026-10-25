@@ -7,24 +7,22 @@
 //
 // Semua aksi memakai Astro Action (src/actions) — menandai selesai, membatalkan, dan
 // menyimpan catatan berjalan lewat RPC, jadi halaman tidak pernah dimuat ulang.
-import { Bell, CalendarCheck, Check, CircleCheck, Inbox, TriangleAlert } from "@lucide/astro";
+import { CheckBadge, Check, CheckCircle, Inbox, ExclamationTriangle } from "../lib/icons";
 import ContributionGraph from "../components/user/ContributionGraph.astro";
 import NoteDialog from "../components/user/NoteDialog.astro";
 import TaskCard from "../components/user/TaskCard.astro";
-import Button from "../components/ui/Button.astro";
 import DashboardLayout from "../layouts/DashboardLayout.astro";
 import { requireUser } from "../lib/auth";
 import { findCategory } from "../lib/categories";
 import {
   listDailyActivity,
   listMissedTasks,
-  listNewAssignments,
   listUserOccurrences,
   markAssignmentsSeen,
   materializeOverdue,
   taskStats,
 } from "../lib/db";
-import { formatDate, formatDateTime, formatPeriod, formatPeriodShort } from "../lib/format";
+import { formatDate, formatPeriod, formatPeriodShort } from "../lib/format";
 import { daysBetween, todayIso } from "../lib/tasks";
 
 const session = await requireUser(Astro);
@@ -40,7 +38,7 @@ if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
   if (form.get("action") === "seen") {
     markAssignmentsSeen(userId);
-    return Astro.redirect("/user#pekerjaan-masuk");
+    return Astro.redirect("/user?inbox=1");
   }
 }
 
@@ -48,41 +46,52 @@ if (Astro.request.method === "POST") {
 materializeOverdue(userId);
 const occurrences = listUserOccurrences(userId);
 const missed = listMissedTasks(userId);
-const newAssignments = listNewAssignments(userId);
 
-const groups = [
-  { id: "hari-ini", title: "Hari ini", items: occurrences.filter((item) => item.due === today) },
-  {
-    id: "minggu-ini",
-    title: "Minggu ini",
-    items: occurrences.filter((item) => item.periode === "Mingguan" && item.due !== today),
-  },
-  {
-    id: "bulan-ini",
-    title: "Bulan ini",
-    items: occurrences.filter((item) => item.periode === "Bulanan" && item.due !== today),
-  },
-  {
-    id: "semester-ini",
-    title: "Semester ini",
-    items: occurrences.filter((item) => item.periode === "Semesteran" && item.due !== today),
-  },
-  {
-    id: "triwulan-ini",
-    title: "Triwulan ini",
-    items: occurrences.filter((item) => item.periode === "Triwulan" && item.due !== today),
-  },
-  {
-    id: "tahun-ini",
-    title: "Tahun ini",
-    items: occurrences.filter((item) => item.periode === "Tahunan" && item.due !== today),
-  },
-  {
-    id: "kegiatan",
-    title: "Kegiatan",
-    items: occurrences.filter((item) => item.periode === "Kegiatan" && item.due !== today),
-  },
-].filter((group) => group.items.length > 0);
+// Urutan kerja, bukan urutan abjad: yang terlambat naik, yang selesai turun. Dihitung
+// di server supaya urutannya sama saat halaman dibuka tanpa JavaScript.
+const workingOrder = (a: (typeof occurrences)[number], b: (typeof occurrences)[number]) => {
+  const rank = (item: (typeof occurrences)[number]) => {
+    if (item.status === "selesai") return 2;
+    return item.due < today ? 0 : 1;
+  };
+  return rank(a) - rank(b) || a.name.localeCompare(b.name, "id", { sensitivity: "base" });
+};
+
+const FILTERS = [
+  { id: "semua", title: "Semua", periode: null },
+  { id: "hari-ini", title: "Hari ini", periode: "Hari ini" },
+  { id: "minggu-ini", title: "Minggu ini", periode: "Mingguan" },
+  { id: "bulan-ini", title: "Bulan ini", periode: "Bulanan" },
+  { id: "triwulan-ini", title: "Triwulan", periode: "Triwulan" },
+  { id: "semester-ini", title: "Semester ini", periode: "Semesteran" },
+  { id: "tahun-ini", title: "Tahun ini", periode: "Tahunan" },
+  { id: "kegiatan", title: "Kegiatan", periode: "Kegiatan" },
+] as const;
+
+// "Hari ini" adalah grup tersendiri di paling atas, dan grup periode mengecualikan
+// tugas yang jatuh tempo hari ini — satu kemunculan hanya boleh muncul satu kali,
+// karena semua aksi menyasar kartunya lewat (activity_id, period_key).
+const groups = FILTERS.filter((filter) => filter.periode !== null).map((filter) => ({
+  id: filter.id,
+  title: filter.title,
+  items: occurrences
+    .filter((item) =>
+      filter.periode === "Hari ini"
+        ? item.due === today
+        : item.periode === filter.periode && item.due !== today,
+    )
+    .sort(workingOrder),
+}));
+
+// Satu sapuan untuk semua angka panel tugas dan bilah hari ini.
+const panelDone = occurrences.filter((item) => item.status === "selesai").length;
+const filters = FILTERS.map((filter) => ({
+  ...filter,
+  count:
+    filter.periode === null
+      ? occurrences.length
+      : groups.find((group) => group.id === filter.id)?.items.length ?? 0,
+}));
 
 const stats = taskStats(userId);
 
@@ -123,9 +132,9 @@ const todayLong = new Date(`${today}T00:00:00Z`).toLocaleDateString("id-ID", {
 });
 
 const statCards = [
-  { key: "done-today", label: "Selesai hari ini", value: stats.doneToday, icon: CalendarCheck },
-  { key: "missed", label: "Terlewat", value: String(stats.missed), icon: TriangleAlert },
-  { key: "done-month", label: "Selesai bulan ini", value: String(stats.doneMonth), icon: CircleCheck },
+  { key: "done-today", label: "Selesai hari ini", value: stats.doneToday, icon: CheckBadge },
+  { key: "missed", label: "Terlewat", value: String(stats.missed), icon: ExclamationTriangle },
+  { key: "done-month", label: "Selesai bulan ini", value: String(stats.doneMonth), icon: CheckCircle },
 ];
 
 /** "Jatuh tempo hari ini" / "Jatuh tempo 25 Okt 2026" (+ keterlambatan). */
@@ -137,13 +146,34 @@ const dueText = (due: string) => {
 ---
 
 <DashboardLayout title="Dashboard" user={session.user}>
-  <div class="flex flex-wrap items-end justify-between gap-3">
-    <div>
+  {/* Kepala halaman: sapaan + satu angka yang paling dicari (kemajuan hari ini).
+      Kartu statistik turun ke bawah — yang pertama terlihat adalah tugasnya. */}
+  <div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3" data-reveal="up">
+    <div class="min-w-0">
       <h1 class="text-xl font-semibold text-slate-900">Halo, {firstName}</h1>
-      <p class="mt-1 text-sm text-slate-500">
-        {todayLong} · {occurrences.length} tugas aktif.
-      </p>
+      <p class="mt-1 text-sm text-slate-500">{todayLong}</p>
     </div>
+
+    {
+      occurrences.length > 0 && (
+        <div class="w-full sm:w-56" data-overall>
+          <div class="flex items-baseline justify-between gap-2 text-xs">
+            <span class="font-medium text-slate-600">Kemajuan</span>
+            <span data-group-count class="tabular-nums text-slate-500">
+              {panelDone}/{occurrences.length} selesai
+            </span>
+          </div>
+          <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200">
+            <div
+              data-progress-bar
+              class="h-full origin-left rounded-full bg-brand-600 transition-transform duration-300"
+              style={`transform: scaleX(${occurrences.length > 0 ? panelDone / occurrences.length : 0})`}
+            >
+            </div>
+          </div>
+        </div>
+      )
+    }
   </div>
 
   <p
@@ -154,112 +184,109 @@ const dueText = (due: string) => {
   >
   </p>
 
-  {/* Pekerjaan masuk: penugasan yang belum dibaca. Satuannya penugasan, bukan
-      kemunculan — tugas harian tidak boleh membunyikan lonceng setiap hari. */}
-  {
-    newAssignments.length > 0 && (
-      <section
-        id="pekerjaan-masuk"
-        data-inbox
-        class="mt-6 rounded-xl border border-brand-200 bg-brand-50"
-        aria-labelledby="pekerjaan-masuk-title"
-      >
-        <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-4 sm:px-5">
-          <div class="flex items-start gap-3">
-            <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
-              <Bell class="size-4" />
-            </span>
-            <div class="min-w-0">
-              <h2 id="pekerjaan-masuk-title" class="text-sm font-semibold text-slate-900">
-                Pekerjaan masuk
-              </h2>
-              <p class="mt-0.5 text-xs text-slate-600">
-                {newAssignments.length} penugasan baru untuk Anda. Buka daftarnya, lalu tandai
-                sudah dibaca.
-              </p>
-            </div>
-          </div>
+  {/* Panel tugas: isi utama dashboard, ditaruh paling atas. Filternya chip periode —
+      satu grup per jenis periode, dengan "Hari ini" sebagai sapuan lintas periode. */}
+  <section class="mt-6" aria-labelledby="tugas-title" data-reveal="up">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 id="tugas-title" class="text-sm font-semibold text-slate-900">Tugas</h2>
+      <p class="text-xs text-slate-500">
+        {panelDone}/{occurrences.length} selesai
+      </p>
+    </div>
 
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              data-inbox-toggle
-              aria-expanded="false"
-              aria-controls="pekerjaan-masuk-list"
-              class="text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-            >
-              Lihat daftar
-            </button>
-            {/* Fallback tanpa JavaScript: form biasa ke halaman ini sendiri. */}
-            <form method="POST">
-              <input type="hidden" name="action" value="seen" />
-              <Button type="submit" size="sm" data-inbox-seen>
-                <Check class="size-4" />
-                Sudah dibaca
-              </Button>
-            </form>
-          </div>
-        </div>
-
-        <ul
-          id="pekerjaan-masuk-list"
-          data-inbox-list
-          hidden
-          class="divide-y divide-brand-100 border-t border-brand-100 px-4 sm:px-5"
+    {
+      occurrences.length > 0 && (
+        <div
+          role="group"
+          aria-label="Filter periode"
+          data-filter-bar
+          class="mt-3 flex flex-wrap gap-1.5"
         >
-          {newAssignments.map((item) => {
-            const category = findCategory(item.category_id);
-            const UnitIcon = category?.icon ?? Inbox;
-            return (
-              <li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
-                {/* Di layar sempit nama aktivitas mengambil satu baris penuh, chip &
-                    unit/tanggal turun ke baris berikutnya. */}
-                <span class="flex w-full min-w-0 items-center gap-2 text-sm text-slate-900 sm:w-auto sm:flex-1">
-                  <UnitIcon class="size-4 shrink-0 text-slate-400" />
-                  <span class="truncate">{item.name}</span>
-                </span>
-                <span class="rounded-full bg-white px-2 py-0.5 text-xs text-slate-600">
-                  {item.periode}
-                </span>
-                <span class="min-w-0 truncate text-xs text-slate-500">
-                  {category?.label ?? item.category_id} · {formatDateTime(item.created_at)}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-    )
-  }
+          {filters
+            .filter((filter) => filter.count > 0)
+            .map((filter) => (
+              <button
+                type="button"
+                data-filter={filter.id}
+                aria-pressed={filter.id === "semua" ? "true" : "false"}
+                class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 aria-pressed:border-brand-600 aria-pressed:bg-brand-600 aria-pressed:text-onbrand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              >
+                {filter.title}
+                <span class="tabular-nums opacity-60">{filter.count}</span>
+              </button>
+            ))}
+        </div>
+      )
+    }
 
-  {
-    occurrences.length > 0 && (
-      <div class="mt-5 grid grid-cols-3 gap-2 sm:mt-6 sm:gap-3">
-        {statCards.map(({ key, label, value, icon: Icon }) => (
-          <div class="rounded-xl border border-slate-200 bg-white p-3 sm:p-5">
-            <span class="grid size-8 place-items-center rounded-lg bg-brand-50 text-brand-600 sm:size-9">
-              <Icon class="size-4 sm:size-5" />
-            </span>
-            <p data-stat={key} class="mt-2 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-              {value}
-            </p>
-            <p class="mt-0.5 text-xs leading-tight text-slate-500 sm:text-sm">{label}</p>
-          </div>
-        ))}
-      </div>
-    )
-  }
+    {
+      groups
+        .filter((group) => group.items.length > 0)
+        .map((group) => {
+          const done = group.items.filter((item) => item.status === "selesai").length;
+          return (
+            <div class="mt-6" data-group={group.id}>
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-semibold text-slate-900">{group.title}</h3>
+                <p data-group-count class="text-xs tabular-nums text-slate-500">
+                  {done}/{group.items.length} selesai
+                </p>
+              </div>
+              <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  data-progress-bar
+                  class="h-full origin-left rounded-full bg-brand-600 transition-transform duration-300"
+                  style={`transform: scaleX(${group.items.length > 0 ? done / group.items.length : 0})`}
+                >
+                </div>
+              </div>
 
-  <ContributionGraph
-    year={graphYear}
-    today={today}
-    days={activity.days}
-    years={activity.years}
-  />
+              <ul class="mt-3 space-y-2">
+                {group.items.map((item) => {
+                  const category = findCategory(item.category_id);
+                  return (
+                    <TaskCard
+                      name={item.name}
+                      unitLabel={category?.label ?? item.category_id}
+                      unitIcon={category?.icon ?? Inbox}
+                      periode={item.periode}
+                      dueText={dueText(item.due)}
+                      dueToday={item.due === today}
+                      periodKey={item.period_key}
+                      activityId={item.activity_id}
+                      done={item.status === "selesai"}
+                      late={item.late}
+                      note={item.note}
+                      link={item.link}
+                      giverName={item.giver_name}
+                      giverEmail={item.giver_email}
+                      noteHref={`/user?note=${item.activity_id}&period=${encodeURIComponent(item.period_key)}`}
+                    />
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })
+    }
 
+    {
+      occurrences.length === 0 && (
+        <div class="mt-3 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+          <Inbox class="size-8 text-slate-300" />
+          <p class="text-sm font-medium text-slate-900">Belum ada penugasan</p>
+          <p class="max-w-sm text-sm text-slate-500">
+            Admin belum memberi tugas pada akun Anda. Hubungi admin bila ini tidak sesuai.
+          </p>
+        </div>
+      )
+    }
+  </section>
+
+  {/* Terlewat: pekerjaan yang bisa dibereskan sekarang, jadi naik ke atas grafik. */}
   {
     missed.length > 0 && (
-      <section class="mt-8">
+      <section class="mt-8" data-reveal="up">
         <div class="flex items-center justify-between gap-3">
           <h2 class="text-sm font-semibold text-red-700">Terlewat</h2>
           <p class="text-xs text-slate-500">{stats.missed} kemunculan</p>
@@ -276,7 +303,7 @@ const dueText = (due: string) => {
               <li class="rounded-xl border border-red-200 bg-red-50/70 p-4">
                 <div class="flex items-start gap-3">
                   <span class="grid size-9 shrink-0 place-items-center rounded-full bg-red-100 text-red-600">
-                    <TriangleAlert class="size-4" />
+                    <ExclamationTriangle class="size-4" />
                   </span>
                   <div class="min-w-0 flex-1">
                     <p class="text-sm font-medium text-slate-900">{item.name}</p>
@@ -320,51 +347,34 @@ const dueText = (due: string) => {
     )
   }
 
+  {/* Rekap: mendukung, bukan mengalahkan daftar tugas. */}
   {
-    groups.map((group) => (
-      <section class="mt-8" data-group={group.id}>
-        <div class="flex items-center justify-between gap-3">
-          <h2 class="text-sm font-semibold text-slate-900">{group.title}</h2>
-          <p data-group-count class="text-xs text-slate-500">
-            {group.items.filter((item) => item.status === "selesai").length}/{group.items.length} selesai
-          </p>
-        </div>
-        <ul class="mt-3 space-y-2">
-          {group.items.map((item) => {
-            const category = findCategory(item.category_id);
-            return (
-              <TaskCard
-                name={item.name}
-                unitLabel={category?.label ?? item.category_id}
-                unitIcon={category?.icon ?? Inbox}
-                periode={item.periode}
-                dueText={dueText(item.due)}
-                periodKey={item.period_key}
-                activityId={item.activity_id}
-                done={item.status === "selesai"}
-                late={item.late}
-                note={item.note}
-                link={item.link}
-                noteHref={`/user?note=${item.activity_id}&period=${encodeURIComponent(item.period_key)}`}
-              />
-            );
-          })}
-        </ul>
-      </section>
-    ))
-  }
-
-  {
-    occurrences.length === 0 && (
-      <div class="mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
-        <Inbox class="size-8 text-slate-300" />
-        <p class="text-sm font-medium text-slate-900">Belum ada penugasan</p>
-        <p class="max-w-sm text-sm text-slate-500">
-          Admin belum memberi tugas pada akun Anda. Hubungi admin bila ini tidak sesuai.
-        </p>
+    occurrences.length > 0 && (
+      <div class="mt-8 grid grid-cols-3 gap-2 sm:gap-3" data-reveal="up">
+        {statCards.map(({ key, label, value, icon: Icon }) => (
+          <div class="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+            <span class="inline-flex items-center gap-1.5 text-xs text-slate-500 sm:text-sm">
+              <Icon class="size-3.5 shrink-0 sm:size-4" />
+              <span class="leading-tight">{label}</span>
+            </span>
+            <p
+              data-stat={key}
+              class="mt-1.5 text-xl font-semibold tracking-tight text-slate-900 tabular-nums sm:text-2xl"
+            >
+              {value}
+            </p>
+          </div>
+        ))}
       </div>
     )
   }
+
+  <ContributionGraph
+    year={graphYear}
+    today={today}
+    days={activity.days}
+    years={activity.years}
+  />
 
   <NoteDialog occurrence={editing} />
 </DashboardLayout>
@@ -376,6 +386,7 @@ const dueText = (due: string) => {
     graphYear,
     patchGraph,
     refreshGroupCounts,
+    setTaskPending,
     setTaskState,
   } from "../scripts/tasks.ts";
 
@@ -403,48 +414,27 @@ const dueText = (due: string) => {
       `[data-task][data-activity-id="${activityId}"][data-period-key="${periodKey}"]`,
     );
 
+  /**
+   * Menampilkan hanya grup filter yang dipilih; "semua" menampilkan semuanya.
+   * Chip hanya dirender untuk grup yang berisi tugas, jadi tidak ada grup kosong
+   * yang perlu dijelaskan.
+   */
+  const applyFilter = (id: string) => {
+    document.querySelectorAll<HTMLElement>("[data-filter]").forEach((chip) => {
+      chip.setAttribute("aria-pressed", String(chip.dataset.filter === id));
+    });
+    document.querySelectorAll<HTMLElement>("[data-group]").forEach((group) => {
+      group.hidden = id !== "semua" && group.dataset.group !== id;
+    });
+  };
+
   document.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
 
-    // Buka/tutup daftar pekerjaan masuk. Elemennya dicari saat dipakai karena router
-    // menukar DOM; seksi ini hilang dari halaman begitu ditandai sudah dibaca.
-    const inboxToggle = target.closest<HTMLElement>("[data-inbox-toggle]");
-    if (inboxToggle) {
-      const section = inboxToggle.closest<HTMLElement>("[data-inbox]");
-      const list = section?.querySelector<HTMLElement>("[data-inbox-list]");
-      if (!list) return;
-      const open = list.hidden;
-      list.hidden = !open;
-      inboxToggle.setAttribute("aria-expanded", String(open));
-      inboxToggle.textContent = open ? "Sembunyikan" : "Lihat daftar";
-      return;
-    }
-
-    // Tandai "pekerjaan masuk" sudah dibaca tanpa memuat ulang halaman.
-    const inboxSeen = target.closest<HTMLElement>("[data-inbox-seen]");
-    if (inboxSeen) {
-      event.preventDefault();
-      clearError();
-
-      const { error } = await actions.markAssignmentsSeen({});
-      if (error) {
-        showError(error.message || "Gagal menandai pekerjaan masuk.");
-        return;
-      }
-
-      // Kartu ditutup di tempat; lonceng di header ikut hilang.
-      const section = inboxSeen.closest<HTMLElement>("[data-inbox]");
-      if (section) {
-        section.style.overflow = "hidden";
-        section.style.maxHeight = `${section.offsetHeight}px`;
-        requestAnimationFrame(() => {
-          section.style.transition = "max-height 0.3s ease, opacity 0.3s ease";
-          section.style.maxHeight = "0px";
-          section.style.opacity = "0";
-        });
-        setTimeout(() => section.remove(), 320);
-      }
-      document.querySelector("[data-bell]")?.remove();
+    // Chip filter periode: menyaring grup yang sudah dirender, tanpa memuat ulang.
+    const filterChip = target.closest<HTMLElement>("[data-filter]");
+    if (filterChip) {
+      applyFilter(filterChip.dataset.filter ?? "semua");
       return;
     }
 
@@ -460,6 +450,7 @@ const dueText = (due: string) => {
       const card = cardOf(activityId, periodKey);
       const name = card?.dataset.name ?? "";
 
+      setTaskPending(card, true);
       const { data, error } = done
         ? await actions.undoTask({ activityId: Number(activityId), periodKey, year: graphYear() })
         : await actions.completeTask({
@@ -467,6 +458,7 @@ const dueText = (due: string) => {
             periodKey,
             year: graphYear(),
           });
+      setTaskPending(card, false);
 
       if (error || !data) {
         showError(error?.message ?? "Tugas gagal diperbarui.");

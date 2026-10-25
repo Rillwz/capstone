@@ -2,13 +2,13 @@
 // Admin dashboard — overview only. The post list lives at /dashboard/posts.
 import {
   ChevronRight,
-  LogIn,
-  MonitorSmartphone,
+  ArrowLeftOnRectangle,
+  ComputerDesktop,
   Newspaper,
-  SquarePen,
+  PencilSquare,
   UserPlus,
   Users,
-} from "@lucide/astro";
+} from "../lib/icons";
 import StatCard from "../components/ui/StatCard.astro";
 import Button from "../components/ui/Button.astro";
 import DashboardLayout from "../layouts/DashboardLayout.astro";
@@ -34,7 +34,7 @@ const firstName = (session.user?.name ?? "Admin").split(" ")[0];
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <Button variant="outline" href="/dashboard/users"><UserPlus class="size-4" />Tambah pengguna</Button>
-      <Button href="/dashboard/posts/new"><SquarePen class="size-4" />Tulis postingan</Button>
+      <Button href="/dashboard/posts/new"><PencilSquare class="size-4" />Tulis postingan</Button>
     </div>
   </div>
 
@@ -52,7 +52,7 @@ const firstName = (session.user?.name ?? "Admin").split(" ")[0];
     </StatCard>
 
     <StatCard label="Login (24 jam)" value={stats.logins24h} hint="Percobaan masuk yang berhasil">
-      <LogIn slot="icon" class="size-5" />
+      <ArrowLeftOnRectangle slot="icon" class="size-5" />
     </StatCard>
   </div>
 
@@ -105,7 +105,7 @@ const firstName = (session.user?.name ?? "Admin").split(" ")[0];
                 <span class="text-sm font-medium text-slate-900">{log.name}</span>
                 <span class="text-xs text-slate-500">{log.email}</span>
                 <span class="ml-auto inline-flex items-center gap-1.5 text-xs text-slate-500">
-                  <MonitorSmartphone class="size-4 text-slate-400" />
+                  <ComputerDesktop class="size-4 text-slate-400" />
                   {describeDevice(log.user_agent)} · IP {log.ip}
                 </span>
                 <span class="w-full text-xs text-slate-400">{formatDateTime(log.created_at)}</span>

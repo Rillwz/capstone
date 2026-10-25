@@ -2,7 +2,7 @@
 // User management — create (default password), edit and delete. Passwords are only ever
 // stored as bcrypt hashes and are never selected for this page.
 //
-// Deleting is a two-step flow: confirm in a modal, then a 15 second undo window
+// Deleting is a two-step flow: confirm in a modal, then a 5 second undo window
 // before the account is really removed. The window lives in the page, so leaving
 // in the meantime cancels the deletion (by design).
 //
@@ -14,18 +14,17 @@
 import {
   Briefcase,
   Check,
-  Lock,
-  MonitorSmartphone,
+  LockClosed,
+  ComputerDesktop,
   Pencil,
   Plus,
-  Search,
+  MagnifyingGlass,
   Trash,
-  TriangleAlert,
-  Undo2,
+  ExclamationTriangle,
   UserPlus,
   Users,
-  X,
-} from "@lucide/astro";
+  XMark,
+} from "../../lib/icons";
 import PasswordReveal from "../../components/admin/PasswordReveal.astro";
 import Button from "../../components/ui/Button.astro";
 import Input from "../../components/ui/Input.astro";
@@ -99,7 +98,7 @@ const levelFilters = [
   {/* Pencarian & filter — menyaring baris yang sudah dirender, tanpa ke server. */}
   <div class="mt-6 flex flex-wrap items-center gap-3" data-reveal="up">
     <div class="relative min-w-0 flex-1 basis-full sm:basis-auto sm:max-w-xs">
-      <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+      <MagnifyingGlass class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
       <label for="field-user-search" class="sr-only">Cari pengguna</label>
       <input
         id="field-user-search"
@@ -216,7 +215,7 @@ const levelFilters = [
                   {user.last_login ? (
                     <>
                       <span class="inline-flex items-center gap-1.5 text-slate-700">
-                        <MonitorSmartphone class="size-3.5 shrink-0 text-slate-400" />
+                        <ComputerDesktop class="size-3.5 shrink-0 text-slate-400" />
                         {describeDevice(user.last_login.user_agent)}
                       </span>
                       <span class="block truncate">
@@ -280,18 +279,18 @@ const levelFilters = [
 
     {/* Hasil pencarian/filter kosong — disembunyikan selama daftarnya utuh. */}
     <div data-user-empty hidden class="flex flex-col items-center gap-2 px-6 py-14 text-center">
-      <Search class="size-8 text-slate-300" />
+      <MagnifyingGlass class="size-8 text-slate-300" />
       <p class="text-sm font-medium text-slate-900">Tidak ada pengguna yang cocok</p>
       <p class="max-w-sm text-sm text-slate-500">Coba kata kunci lain atau ubah filter level.</p>
       <Button variant="outline" size="sm" type="button" data-user-reset class="mt-1">
-        <X class="size-4" />
+        <XMark class="size-4" />
         Reset pencarian
       </Button>
     </div>
   </div>
 
   <p class="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500">
-    <Lock class="size-3.5 text-slate-400" />
+    <LockClosed class="size-3.5 text-slate-400" />
     Kata sandi tersimpan sebagai hash dan tidak dapat dilihat.
   </p>
 
@@ -309,7 +308,7 @@ const levelFilters = [
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -378,7 +377,7 @@ const levelFilters = [
         aria-label="Tutup"
         class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
       >
-        <X class="size-4" />
+        <XMark class="size-4" />
       </button>
     </div>
 
@@ -462,7 +461,7 @@ const levelFilters = [
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -489,17 +488,20 @@ const levelFilters = [
           <select
             id="field-edit-role"
             name="role"
-            class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+            class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
           >
             <option value="0">Admin</option>
             <option value="1">Level 1</option>
             <option value="2">Level 2</option>
           </select>
+          <p data-edit-role-hint hidden class="mt-1.5 text-xs text-slate-500">
+            Level akun admin tidak bisa diubah.
+          </p>
         </div>
       </div>
 
       <p class="mx-5 mb-5 flex items-center gap-1.5 text-xs text-slate-500 sm:mx-6">
-        <Lock class="size-3.5 text-slate-400" />
+        <LockClosed class="size-3.5 text-slate-400" />
         Kata sandi tidak berubah di sini.
       </p>
 
@@ -520,7 +522,7 @@ const levelFilters = [
     <div class="p-5 sm:p-6">
       <div class="flex items-start gap-3">
         <span class="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">
-          <TriangleAlert class="size-5" />
+          <ExclamationTriangle class="size-5" />
         </span>
         <div class="min-w-0 flex-1">
           <h2 id="delete-dialog-title" class="text-base font-semibold text-slate-900">
@@ -540,14 +542,14 @@ const levelFilters = [
           </div>
           <p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
             Akun, riwayat login, dan postingannya akan dihapus permanen. Tindakan ini tidak dapat
-            dibatalkan setelah 15 detik.
+            dibatalkan setelah 5 detik.
           </p>
         </div>
       </div>
 
       <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="outline" type="button" data-dialog-cancel>
-          <X class="size-4" />
+          <XMark class="size-4" />
           Batal
         </Button>
         <Button variant="dangerSolid" type="button" data-dialog-confirm>
@@ -557,36 +559,14 @@ const levelFilters = [
       </div>
     </div>
   </dialog>
-
-  <div id="delete-pending" hidden role="status" aria-live="polite" class="fixed inset-x-0 bottom-6 z-50 px-4">
-    <div class="mx-auto w-full max-w-sm overflow-hidden rounded-xl bg-inverse text-oninverse shadow-2xl">
-      <div class="flex items-center gap-3 px-4 py-3">
-        <Trash class="size-4 shrink-0 text-slate-400" />
-        <p class="min-w-0 flex-1 text-sm">
-          Menghapus <span data-pending-name class="font-semibold"></span>…
-        </p>
-        <button
-          type="button"
-          data-pending-undo
-          class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-brand-300 transition-colors hover:bg-oninverse/10 hover:text-oninverse focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
-        >
-          <Undo2 class="size-4" />
-          Batalkan
-        </button>
-      </div>
-      <div class="h-1 bg-oninverse/15">
-        <div data-pending-progress class="h-full bg-brand-400"></div>
-      </div>
-    </div>
-  </div>
 </DashboardLayout>
 
 <script>
   import { actions } from "astro:actions";
   import { refreshPage, toast } from "../../scripts/dashboard.ts";
-  import { hideToast, showToast } from "../../scripts/motion.ts";
+  import type { ToastHandle } from "../../scripts/toast.ts";
 
-  const UNDO_MS = 15000;
+  const UNDO_MS = 5000;
 
   // The router swaps the DOM but keeps this module, so the flow is wired again on
   // every astro:page-load.
@@ -729,6 +709,8 @@ const levelFilters = [
 
     if (editDialog && editForm) {
       const field = (name: string) => editForm.elements.namedItem(name) as HTMLInputElement | null;
+      const roleSelect = editForm.elements.namedItem("role") as HTMLSelectElement | null;
+      const roleHint = editForm.querySelector<HTMLElement>("[data-edit-role-hint]");
       let editingId = 0;
 
       document.querySelectorAll<HTMLButtonElement>("[data-edit-open]").forEach((trigger) => {
@@ -738,6 +720,12 @@ const levelFilters = [
           field("email")!.value = trigger.dataset.email ?? "";
           field("role")!.value = trigger.dataset.role ?? "1";
           if (editSubtitle) editSubtitle.textContent = trigger.dataset.email ?? "";
+
+          // Admin keeps its level: one left demoted could lock the area out. The select
+          // stays in the form (disabled) so the submit still reads the current value.
+          const isAdmin = trigger.dataset.role === "0";
+          if (roleSelect) roleSelect.disabled = isAdmin;
+          if (roleHint) roleHint.hidden = !isAdmin;
 
           // Jabatan yang sudah dihapus dari daftar tetap ditampilkan sebagai pilihan
           // sementara, supaya menyimpan form tidak diam-diam mengosongkannya.
@@ -837,24 +825,20 @@ const levelFilters = [
     }
 
     const dialog = document.getElementById("delete-dialog") as HTMLDialogElement | null;
-    const notice = document.getElementById("delete-pending") as HTMLElement | null;
     // The script stays loaded across navigations — other pages have no delete flow.
-    if (!dialog || !notice) return;
+    if (!dialog) return;
 
     const confirmButton = dialog.querySelector<HTMLButtonElement>("[data-dialog-confirm]")!;
     const dialogName = dialog.querySelector<HTMLElement>("[data-dialog-name]")!;
     const dialogEmail = dialog.querySelector<HTMLElement>("[data-dialog-email]")!;
     const dialogInitials = dialog.querySelector<HTMLElement>("[data-dialog-initials]")!;
 
-    const noticeName = notice.querySelector<HTMLElement>("[data-pending-name]")!;
-    const noticeProgress = notice.querySelector<HTMLElement>("[data-pending-progress]")!;
-    const undoButton = notice.querySelector<HTMLButtonElement>("[data-pending-undo]")!;
-
     const triggers = [...document.querySelectorAll<HTMLButtonElement>("[data-delete-open]")];
 
     let asked: HTMLButtonElement | null = null; // row currently shown in the modal
     let pending: HTMLButtonElement | null = null; // row waiting out the undo window
     let timer: number | undefined;
+    let pendingToast: ToastHandle | undefined;
 
     // shortcut: one pending delete at a time — the action runs once, so a second row
     // would silently lose its own countdown. Move to a queue if batch deletes are needed.
@@ -868,8 +852,8 @@ const levelFilters = [
       if (row) row.style.opacity = "1";
       pending = null;
       lockRows(false);
-      hideToast(notice);
-      noticeProgress.classList.remove("pending-countdown");
+      pendingToast?.dismiss();
+      pendingToast = undefined;
     };
 
     triggers.forEach((trigger) => {
@@ -902,11 +886,11 @@ const levelFilters = [
       if (pendingRow) pendingRow.style.opacity = "0.5";
       lockRows(true);
 
-      noticeName.textContent = row.dataset.name ?? "";
-      showToast(notice);
-      noticeProgress.classList.remove("pending-countdown");
-      void noticeProgress.offsetWidth; // restart the bar on a repeat run
-      noticeProgress.classList.add("pending-countdown");
+      const name = row.dataset.name ?? "";
+      pendingToast = toast(`Menghapus ${name}…`, "info", {
+        duration: UNDO_MS,
+        action: { label: "Batalkan", onClick: cancelPending },
+      });
 
       // The undo window runs out → the account is really deleted.
       timer = window.setTimeout(async () => {
@@ -916,12 +900,13 @@ const levelFilters = [
           cancelPending();
           return;
         }
+        pending = null;
+        pendingToast = undefined;
+        lockRows(false);
         await refreshPage();
         toast("Pengguna dihapus.");
       }, UNDO_MS);
     });
-
-    undoButton.addEventListener("click", cancelPending);
   };
 
   document.addEventListener("astro:page-load", init);

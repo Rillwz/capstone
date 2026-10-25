@@ -2,7 +2,7 @@
 // Markdown editor with a live preview pane ("semacam WYSIWYG").
 // Posts to the current URL — the page decides create vs. update. The save goes
 // through an Astro Action, so publishing does not reload the page.
-import { Bold, Code, Heading2, Italic, Link, List, Quote, X } from "@lucide/astro";
+import { Bold, CodeBracket, H2, Italic, Link, ListBullet, ChatBubbleLeftEllipsis, XMark } from "../../lib/icons";
 import Button from "../ui/Button.astro";
 import Input from "../ui/Input.astro";
 
@@ -21,10 +21,10 @@ const { post, error, submitLabel = "Simpan", postId, action = "create" } = Astro
 const tools = [
   { md: "bold", icon: Bold, label: "Tebal" },
   { md: "italic", icon: Italic, label: "Miring" },
-  { md: "heading", icon: Heading2, label: "Sub-judul" },
-  { md: "list", icon: List, label: "Daftar" },
-  { md: "quote", icon: Quote, label: "Kutipan" },
-  { md: "code", icon: Code, label: "Kode" },
+  { md: "heading", icon: H2, label: "Sub-judul" },
+  { md: "list", icon: ListBullet, label: "Daftar" },
+  { md: "quote", icon: ChatBubbleLeftEllipsis, label: "Kutipan" },
+  { md: "code", icon: CodeBracket, label: "Kode" },
   { md: "link", icon: Link, label: "Tautan" },
 ];
 ---
@@ -85,7 +85,7 @@ const tools = [
 
   <div class="flex items-center gap-3">
     <Button type="submit">{submitLabel}</Button>
-    <Button variant="outline" href="/dashboard/posts"><X class="size-4" />Batal</Button>
+    <Button variant="outline" href="/dashboard/posts"><XMark class="size-4" />Batal</Button>
   </div>
 </form>
 
@@ -116,7 +116,7 @@ const tools = [
       const title = form.querySelector<HTMLInputElement>('[name="title"]')?.value ?? "";
       const body = textarea.value;
       if (!title.trim() || !body.trim()) {
-        toast("Judul dan isi wajib diisi.", "error");
+        toast("Judul dan isi wajib diisi.", "warning");
         return;
       }
 

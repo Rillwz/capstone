@@ -6,7 +6,7 @@
 // tambah lagi" reopens the modal on a clean, empty form for the next entry.
 // Deleting is its own modal ("Hapus aktivitas") where rows are ticked and removed in one
 // go — no per-row button in the table.
-import { ArrowLeft, Check, ChevronRight, ClipboardList, Plus, Trash, X } from "@lucide/astro";
+import { ArrowLeft, Check, ChevronRight, ClipboardDocumentList, Plus, Trash, XMark } from "../../../lib/icons";
 import Button from "../../../components/ui/Button.astro";
 import ChoiceGroup from "../../../components/ui/ChoiceGroup.astro";
 import Input from "../../../components/ui/Input.astro";
@@ -15,7 +15,7 @@ import { CLASSIFICATIONS, PERIODES } from "../../../lib/activities";
 import { requireAdmin } from "../../../lib/auth";
 import { findCategory } from "../../../lib/categories";
 import { listActivities } from "../../../lib/db";
-import { formatDay } from "../../../lib/format";
+import { formatDate, formatRange } from "../../../lib/format";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
@@ -31,7 +31,8 @@ const flagValues = () => CLASSIFICATIONS.map(({ value }) => value);
 // edited (?edit=<id>).
 let draft = {
   name: "",
-  day: "",
+  start_date: "",
+  end_date: "",
   classifications: ["utama"] as string[],
   periode: "Harian",
   frequency: "1",
@@ -49,7 +50,8 @@ if (edited) {
   dialogOpen = true;
   draft = {
     name: edited.name,
-    day: edited.date ? String(Number(edited.date.slice(8, 10))) : "",
+    start_date: edited.start_date,
+    end_date: edited.end_date,
     classifications: flagValues().filter((flag) => edited[flag]),
     periode: edited.periode,
     frequency: String(edited.frequency),
@@ -92,7 +94,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
         <Trash class="size-4" />Hapus
       </Button>
       <Button size="sm" variant="outline" type="button" data-manage-open>
-        <ClipboardList class="size-4" />Edit
+        <ClipboardDocumentList class="size-4" />Edit
       </Button>
       <Button size="sm" type="button" data-activity-open><Plus class="size-4" />Tambah</Button>
     </div>
@@ -103,7 +105,8 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
       <thead class="border-b border-slate-200 text-[11px] tracking-wide text-slate-500 uppercase">
         <tr>
           <th class="px-4 py-2.5 font-medium">Jenis Aktivitas</th>
-          <th class="px-4 py-2.5 font-medium">Tanggal</th>
+          <th class="px-4 py-2.5 font-medium">Mulai</th>
+          <th class="px-4 py-2.5 font-medium">Tenggat</th>
           <th class="px-3 py-2.5 text-center font-medium">Utama</th>
           <th class="px-3 py-2.5 text-center font-medium">Periodik</th>
           <th class="px-3 py-2.5 text-center font-medium">Bukan Tupoksi</th>
@@ -118,7 +121,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
         {
           activities.length === 0 ? (
             <tr>
-              <td colspan="9" class="px-4 py-8 text-center text-slate-500">
+              <td colspan="10" class="px-4 py-8 text-center text-slate-500">
                 Belum ada jenis aktivitas untuk unit ini.
               </td>
             </tr>
@@ -126,7 +129,8 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
             activities.map((activity) => (
               <tr class="align-top" data-reveal="fade">
                 <td class="px-4 py-2.5 font-medium text-slate-900">{activity.name}</td>
-                <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{formatDay(activity.date)}</td>
+                <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{formatDate(activity.start_date)}</td>
+                <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{formatDate(activity.end_date)}</td>
                 {CLASSIFICATIONS.map(({ value }) => (
                   <td class="px-3 py-2.5 text-center">
                     {activity[value] ? (
@@ -164,7 +168,6 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
       data-activity-form
       data-category-id={categoryId}
       data-edit-id={editId}
-      data-month={edited?.date.slice(0, 7) ?? ""}
     >
       <div class="flex items-start justify-between gap-3">
         <div>
@@ -179,7 +182,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -193,7 +196,8 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
             required
           />
         </div>
-        <Input label="Setiap Tanggal" name="day" type="text" inputmode="numeric" value={draft.day} />
+        <Input label="Mulai" name="start_date" type="date" value={draft.start_date} />
+        <Input label="Tenggat" name="end_date" type="date" value={draft.end_date} />
         <Input label="Durasi (menit)" name="minutes" type="number" value={draft.minutes} required />
         <div class="sm:col-span-2">
           <ChoiceGroup
@@ -261,7 +265,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -283,7 +287,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
                     <span class="min-w-0 flex-1">
                       <span class="block text-sm font-medium text-slate-900">{activity.name}</span>
                       <span class="mt-0.5 block text-xs text-slate-500">
-                        {formatDay(activity.date)} · {activity.periode}
+                        {formatRange(activity.start_date, activity.end_date)} · {activity.periode}
                       </span>
                     </span>
                   </label>
@@ -315,7 +319,7 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
         aria-label="Tutup"
         class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
       >
-        <X class="size-4" />
+        <XMark class="size-4" />
       </button>
     </div>
 
@@ -334,7 +338,8 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
                   <span class="min-w-0 flex-1">
                     <span class="block text-sm font-medium text-slate-900">{activity.name}</span>
                     <span class="mt-0.5 block text-xs text-slate-500">
-                      {formatDay(activity.date)} · {activity.periode} · {activity.frequency}×/tahun ·{" "}
+                      {formatRange(activity.start_date, activity.end_date)} · {activity.periode} ·{" "}
+                      {activity.frequency}×/tahun ·{" "}
                       {activity.minutes} menit · {activity.sdm} SDM · volume {activity.volume.toLocaleString("id-ID")}
                     </span>
                   </span>
@@ -471,7 +476,8 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
         categoryId: activityForm.dataset.categoryId ?? "",
         id: editId,
         name: String(data.get("name") ?? ""),
-        day: Number(data.get("day") || 0),
+        start_date: String(data.get("start_date") ?? ""),
+        end_date: String(data.get("end_date") ?? ""),
         utama: data.has("utama"),
         periodik: data.has("periodik"),
         bukan_tupoksi: data.has("bukan_tupoksi"),
@@ -479,9 +485,6 @@ const volume = (frequency: string, minutes: string, sdm: string) => {
         frequency: Number(data.get("frequency")),
         minutes: Number(data.get("minutes")),
         sdm: Number(data.get("sdm")),
-        // Baris lama tetap memakai bulan sendiri, jadi perbaiki tanggalnya tidak
-        // menjatuhkan baris itu ke bulan berjalan.
-        month: activityForm.dataset.month || undefined,
       });
 
       if (error) {

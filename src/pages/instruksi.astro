@@ -1,0 +1,79 @@
+---
+// Instruksi — sisi admin. Semua instruksi yang diberikan admin,
+// dengan progres per periode.
+//
+// Terpisah dari /dashboard/assignments (katalog & per-user) karena pertanyaannya beda:
+// di sana "siapa memegang apa", di sini "pekerjaan yang saya berikan sudah jalan atau
+// belum". Penugasan massal dari katalog tidak masuk sini — origin-nya bukan 'langsung'.
+import { ArrowLeft, Bolt } from "../lib/icons";
+import GivenAssignments from "../components/GivenAssignments.astro";
+import Button from "../components/ui/Button.astro";
+import ToastFlash from "../components/ui/ToastFlash.astro";
+import DashboardLayout from "../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../lib/auth";
+import { deleteDirectAssignment, listGivenAssignments } from "../lib/db";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const userId = Number(session.user!.id);
+if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequired");
+
+// Koreksi tanpa JavaScript: form biasa ke halaman ini sendiri.
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  if (form.get("action") === "remove") {
+    const removed = deleteDirectAssignment(Number(form.get("id") ?? 0), userId);
+    return Astro.redirect(removed ? "/instruksi?removed=1" : "/instruksi?denied=1");
+  }
+}
+
+const onlyUnfinished = Astro.url.searchParams.has("belum");
+const given = listGivenAssignments(userId, onlyUnfinished);
+const removed = Astro.url.searchParams.has("removed");
+const denied = Astro.url.searchParams.has("denied");
+---
+
+<DashboardLayout title="Instruksi" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Instruksi</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Pantau progres pekerjaan yang Anda berikan langsung ke pegawai.
+      </p>
+    </div>
+    <Button href="/dashboard/assignments">
+      <Bolt class="size-4" />
+      Beri instruksi
+    </Button>
+  </div>
+
+  {removed && <ToastFlash message="Instruksi dilepas." params="removed" />}
+  {
+    denied && (
+      <ToastFlash
+        tone="error"
+        message="Penugasan itu bukan milik Anda atau sudah dilepas."
+        params="denied"
+      />
+    )
+  }
+
+  <div class="mt-6">
+    <GivenAssignments
+      rows={given}
+      action="/instruksi"
+      onlyUnfinished={onlyUnfinished}
+      title="Yang Anda berikan"
+      hint="Hanya instruksi. Penugasan dari katalog dikelola di halaman Penugasan."
+    />
+  </div>
+
+  <a
+    href="/dashboard/assignments"
+    class="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
+  >
+    <ArrowLeft class="size-4" />
+    Kembali ke katalog penugasan
+  </a>
+</DashboardLayout>

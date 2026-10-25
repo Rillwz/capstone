@@ -128,15 +128,44 @@ export function currentPeriod(periode: Periode, today: string): Period {
 const MAX_PERIODS = 400;
 
 /**
- * Every period that ended before `current` started, going back to `from` (the day the
- * penugasan was made). Those are the periods a user can have missed.
+ * Rentang berlaku satu aktivitas. `start` kosong = sudah berlaku sejak penugasan
+ * dibuat, `end` kosong = berulang tanpa batas.
  */
-export function pastPeriods(periode: Periode, from: string, current: Period): Period[] {
+export interface ActiveRange {
+  start: string;
+  end: string;
+}
+
+/**
+ * Periode yang berlaku hari ini, atau `null` bila tugasnya belum mulai atau masa
+ * berlakunya sudah lewat. Tugas yang tenggatnya lewat berhenti berulang — bukan muncul
+ * terus sebagai "terlambat" baru setiap periode.
+ */
+export function activePeriod(periode: Periode, today: string, range: ActiveRange): Period | null {
+  if (range.start && today < range.start) return null;
+  if (range.end && today > range.end) return null;
+  return currentPeriod(periode, today);
+}
+
+/**
+ * Every period that ended before `current` started, going back to `from` (the day the
+ * penugasan was made, or the activity's start date if that is later). `end` stops the
+ * walk: periods starting after the deadline never come into being.
+ */
+export function pastPeriods(
+  periode: Periode,
+  from: string,
+  current: Period,
+  end = "",
+): Period[] {
   const out: Period[] = [];
+  const bounded = (period: Period) => end !== "" && period.start > end;
 
   if (periode === "Harian") {
     for (let day = from; day < current.start && out.length < MAX_PERIODS; day = addDays(day, 1)) {
-      out.push({ key: day, start: day, end: day });
+      const period = { key: day, start: day, end: day };
+      if (bounded(period)) break;
+      out.push(period);
     }
     return out;
   }
@@ -147,7 +176,9 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
       monday < current.start && out.length < MAX_PERIODS;
       monday = addDays(monday, 7)
     ) {
-      out.push(periodFromKey(periode, isoWeekKey(monday)));
+      const period = periodFromKey(periode, isoWeekKey(monday));
+      if (bounded(period)) break;
+      out.push(period);
     }
     return out;
   }
@@ -158,7 +189,9 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
     while (out.length < MAX_PERIODS) {
       const key = `${year}-${String(month).padStart(2, "0")}`;
       if (`${key}-01` >= current.start) break;
-      out.push(periodFromKey(periode, key));
+      const period = periodFromKey(periode, key);
+      if (bounded(period)) break;
+      out.push(period);
       month += 1;
       if (month > 12) {
         month = 1;
@@ -173,8 +206,10 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
     let quarter = Math.ceil(Number(from.slice(5, 7)) / 3);
     while (out.length < MAX_PERIODS) {
       const key = `${year}-Q${quarter}`;
-      if (periodFromKey(periode, key).start >= current.start) break;
-      out.push(periodFromKey(periode, key));
+      const period = periodFromKey(periode, key);
+      if (period.start >= current.start) break;
+      if (bounded(period)) break;
+      out.push(period);
       quarter += 1;
       if (quarter > 4) {
         quarter = 1;
@@ -188,8 +223,10 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
     let year = Number(from.slice(0, 4));
     while (out.length < MAX_PERIODS) {
       const key = String(year);
-      if (periodFromKey(periode, key).start >= current.start) break;
-      out.push(periodFromKey(periode, key));
+      const period = periodFromKey(periode, key);
+      if (period.start >= current.start) break;
+      if (bounded(period)) break;
+      out.push(period);
       year += 1;
     }
     return out;
@@ -201,7 +238,9 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
     const key = `${year}-S${half}`;
     const start = half === 1 ? `${year}-01-01` : `${year}-07-01`;
     if (start >= current.start) break;
-    out.push(periodFromKey(periode, key));
+    const period = periodFromKey(periode, key);
+    if (bounded(period)) break;
+    out.push(period);
     half += 1;
     if (half > 2) {
       half = 1;
@@ -213,14 +252,22 @@ export function pastPeriods(periode: Periode, from: string, current: Period): Pe
 
 /**
  * The day the occurrence is due. Daily tasks are due that day, weekly ones at the end
- * of the week, semester ones at the end of the semester. A monthly activity carries its
- * own day of the month; without one the month itself is the deadline.
+ * of the week, semester ones at the end of the semester. Monthly activities anchor on
+ * the day-of-month of their start date; without one the month itself is the deadline.
+ * The deadline of the activity (`end`) caps it, so nothing is due after the task ended.
  */
-export function dueDate(periode: Periode, period: Period, activityDate: string): string {
-  if ((periode === "Bulanan" || periode === "Kegiatan") && activityDate) {
-    const day = Number(activityDate.slice(8, 10));
+export function dueDate(
+  periode: Periode,
+  period: Period,
+  startDate: string,
+  endDate = "",
+): string {
+  let due = period.end;
+  if ((periode === "Bulanan" || periode === "Kegiatan") && startDate) {
+    const day = Number(startDate.slice(8, 10));
     const last = daysInMonth(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)));
-    return `${period.key}-${String(Math.min(day, last)).padStart(2, "0")}`;
+    due = `${period.key}-${String(Math.min(day, last)).padStart(2, "0")}`;
   }
-  return period.end;
+  return endDate && due > endDate ? endDate : due;
 }
+

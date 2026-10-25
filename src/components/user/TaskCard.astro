@@ -2,22 +2,30 @@
 // Satu tugas di ruang kerja user: nama, unit kerja, periode, jatuh tempo, dan tombol
 // centang. Centangnya memakai Astro Action (lihat src/actions) — jadi tandanya selesai
 // tidak memuat ulang halaman.
-import { Check, Clock } from "@lucide/astro";
-import type { AstroComponent } from "@lucide/astro";
+//
+// Status (selesai / terlambat / jatuh tempo hari ini) ditulis lewat data-state, bukan
+// dirender ulang: aksi hanya mengganti atributnya.
+import { Check, Clock, User } from "../../lib/icons";
+import type { IconComponent } from "../../lib/icons";
 import TaskNote from "./TaskNote.astro";
 
 interface Props {
   name: string;
   unitLabel: string;
-  unitIcon: AstroComponent;
+  unitIcon: IconComponent;
   periode: string;
   dueText: string;
+  /** Jatuh tempo hari ini — lencana "Hari ini" selama tugasnya belum dicentang. */
+  dueToday?: boolean;
   periodKey: string;
   activityId: number;
   done: boolean;
   late?: boolean;
   note?: string;
   link?: string;
+  /** Siapa yang menugaskan. Kosong untuk baris lama yang diberikan sistem. */
+  giverName?: string | null;
+  giverEmail?: string | null;
   /** Fallback tanpa JavaScript: halaman dengan dialog catatan terbuka. */
   noteHref: string;
 }
@@ -28,21 +36,29 @@ const {
   unitIcon: UnitIcon,
   periode,
   dueText,
+  dueToday = false,
   periodKey,
   activityId,
   done,
   late = false,
   note = "",
   link = "",
+  giverName = null,
+  giverEmail = null,
   noteHref,
 } = Astro.props;
+
+// Lencana awal, sama dengan yang ditulis `setTaskState` setelah aksi.
+const badgeState = done ? (late ? "late" : "done") : dueToday ? "due" : "none";
+const badgeText = done ? (late ? "Terlambat" : "Selesai") : dueToday ? "Hari ini" : "";
 ---
 
 <li
-  class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4"
+  class="flex items-start gap-3 rounded-xl border border-slate-200 p-3.5 transition-colors duration-200 sm:p-4"
   data-task
   data-reveal="up"
   data-done={String(done)}
+  data-due-today={String(dueToday)}
   data-name={name}
   data-activity-id={activityId}
   data-period-key={periodKey}
@@ -55,14 +71,26 @@ const {
     data-state={done ? "done" : "open"}
     aria-label={done ? `Batalkan tanda selesai: ${name}` : `Tandai selesai: ${name}`}
     title={done ? "Batalkan tanda selesai" : "Tandai selesai"}
-    class="grid size-9 shrink-0 place-items-center rounded-full border-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+    class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full border-2 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
   >
     <Check class="size-4" />
   </button>
 
   <div class="min-w-0 flex-1">
-    <p class="text-sm font-medium text-slate-900">{name}</p>
-    <p class="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+    <div class="flex items-start justify-between gap-2">
+      <p data-task-name class="text-sm leading-snug font-medium break-words text-slate-900">
+        {name}
+      </p>
+      <span
+        data-task-badge
+        data-state={badgeState}
+        class="mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      >
+        {badgeText}
+      </span>
+    </div>
+
+    <p class="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
       <span class="inline-flex items-center gap-1">
         <UnitIcon class="size-3.5" />
         {unitLabel}
@@ -74,6 +102,26 @@ const {
       </span>
     </p>
 
+    {/* Asal tugas. Sengaja di baris sendiri: ini yang dicari saat pegawai bertanya
+        "ini tugas siapa?", dan mencampurnya ke baris unit membuatnya tidak terlihat. */}
+    {
+      giverName && (
+        <p class="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+          <User class="size-3.5 shrink-0 text-slate-400" />
+          <span class="shrink-0">Dari</span>
+          <span class="min-w-0 truncate font-medium text-slate-600">{giverName}</span>
+          {giverEmail && (
+            <>
+              <span aria-hidden="true" class="shrink-0 text-slate-300">·</span>
+              <span class="min-w-0 truncate text-slate-400" title={giverEmail}>
+                {giverEmail}
+              </span>
+            </>
+          )}
+        </p>
+      )
+    }
+
     <TaskNote
       activityId={activityId}
       periodKey={periodKey}
@@ -83,20 +131,31 @@ const {
       noteHref={noteHref}
     />
   </div>
-
-  <span
-    data-task-badge
-    data-state={done ? (late ? "late" : "done") : "none"}
-    class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-  >
-    {done ? (late ? "Terlambat" : "Selesai") : ""}
-  </span>
 </li>
 
 <style>
-  /* Status kartu: centang dan lencana ditulis lewat data-state, supaya aksi bisa
-     mengubahnya tanpa memuat ulang halaman. Warnanya lewat token tema, jadi ikut
+  /* Status kartu: centang, judul, dan lencana ditulis lewat data-state, supaya aksi
+     bisa mengubahnya tanpa memuat ulang halaman. Warnanya lewat token tema, jadi ikut
      berubah bersama tema yang aktif. */
+  [data-task] {
+    background-color: var(--color-white);
+  }
+  [data-task][data-done="true"] {
+    background-color: var(--color-slate-50);
+  }
+  [data-task][data-done="true"] [data-task-name] {
+    color: var(--color-slate-400);
+    text-decoration: line-through;
+  }
+
+  /* Aksi sedang berjalan: kartunya diam, tombolnya tidak bisa ditekan dua kali. */
+  [data-task][aria-busy="true"] {
+    opacity: 0.6;
+  }
+  [data-task][aria-busy="true"] [data-task-toggle] {
+    pointer-events: none;
+  }
+
   [data-task-toggle][data-state="open"] {
     border-color: var(--color-slate-300);
     background-color: var(--color-white);
@@ -116,6 +175,10 @@ const {
     color: var(--color-emerald-700);
   }
   [data-task-badge][data-state="late"] {
+    background-color: var(--color-amber-50);
+    color: var(--color-amber-700);
+  }
+  [data-task-badge][data-state="due"] {
     background-color: var(--color-amber-50);
     color: var(--color-amber-700);
   }

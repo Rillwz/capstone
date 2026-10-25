@@ -80,10 +80,22 @@ export function setTaskState(
     toggle.title = state.done ? "Batalkan tanda selesai" : "Tandai selesai";
   }
 
+  // Batal centang mengembalikan lencana ke "Hari ini" bila memang jatuh tempo hari ini.
   const badge = card.querySelector<HTMLElement>("[data-task-badge]");
-  if (badge) badge.dataset.state = state.done ? (state.late ? "late" : "done") : "none";
+  if (badge) {
+    const dueToday = card.dataset.dueToday === "true";
+    badge.dataset.state = state.done ? (state.late ? "late" : "done") : dueToday ? "due" : "none";
+    badge.textContent = state.done ? (state.late ? "Terlambat" : "Selesai") : dueToday ? "Hari ini" : "";
+  }
 
   refreshGroupCounts(root);
+}
+
+/** Aksi sedang berjalan: kartunya diam dan tombolnya tidak bisa ditekan dua kali. */
+export function setTaskPending(card: HTMLElement | null, pending: boolean) {
+  if (!card) return;
+  if (pending) card.setAttribute("aria-busy", "true");
+  else card.removeAttribute("aria-busy");
 }
 
 /** Menulis tiga penghitung dari jawaban server. */
@@ -97,15 +109,41 @@ export function applyStats(stats: TaskStats, root: ParentNode = document) {
   set("done-month", String(stats.doneMonth));
 }
 
-/** Menghitung ulang "x/y selesai" tiap kelompok dari kartu-kartunya. */
+/** Menghitung ulang "x/y selesai" dan bar kemajuan tiap kelompok dari kartu-kartunya. */
 export function refreshGroupCounts(root: ParentNode = document) {
   root.querySelectorAll<HTMLElement>("[data-group]").forEach((group) => {
-    const counter = group.querySelector<HTMLElement>("[data-group-count]");
-    if (!counter) return;
     const cards = [...group.querySelectorAll<HTMLElement>("[data-task]")];
     const done = cards.filter((card) => card.dataset.done === "true").length;
-    counter.textContent = `${done}/${cards.length} selesai`;
+    setProgress(group, done, cards.length);
   });
+
+  // Bilah "Kemajuan" di kepala halaman menghitung semua kartu, bukan satu kelompok.
+  root.querySelectorAll<HTMLElement>("[data-overall]").forEach((overall) => {
+    const cards = [...root.querySelectorAll<HTMLElement>("[data-task]")];
+    const done = cards.filter((card) => card.dataset.done === "true").length;
+    setProgress(overall, done, cards.length);
+  });
+}
+
+/** "3/8 selesai" + lebar bar. Dipakai per kelompok dan untuk bilah hari ini. */
+export function setProgress(scope: ParentNode, done: number, total: number) {
+  const counter = scope.querySelector<HTMLElement>("[data-group-count]");
+  if (counter) counter.textContent = `${done}/${total} selesai`;
+  const bar = scope.querySelector<HTMLElement>("[data-progress-bar]");
+  if (bar) bar.style.transform = `scaleX(${total > 0 ? done / total : 0})`;
+}
+
+/**
+ * Lonceng setelah "sudah dibaca": angkanya hilang tanpa memuat ulang halaman.
+ * Aman dipanggil dua kali — elemennya dicari saat dipakai.
+ */
+export function clearBell(root: ParentNode = document) {
+  const bell = root.querySelector<HTMLElement>("[data-bell]");
+  if (!bell) return;
+  bell.querySelector("[data-bell-count]")?.remove();
+  bell.dataset.unseen = "0";
+  bell.setAttribute("aria-label", "Pekerjaan masuk");
+  bell.setAttribute("title", "Pekerjaan masuk");
 }
 
 /** Memasang catatan & tautan pada satu kartu (kosong keduanya berarti dihapus). */

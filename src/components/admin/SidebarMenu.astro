@@ -3,12 +3,12 @@
 // It is a modal <dialog>, so Esc, the focus trap and the backdrop come from the
 // browser; the panel itself floats inset from the viewport (see .menu-dialog). The list
 // is SidebarNav, shared with the docked sidebar in DashboardLayout.
-import { LogOut, PanelLeft, X } from "@lucide/astro";
-import type { AstroComponent } from "@lucide/astro";
+import { ArrowRightOnRectangle, Bars3, XMark } from "../../lib/icons";
+import type { IconComponent } from "../../lib/icons";
 import SidebarNav from "./SidebarNav.astro";
 
 interface Props {
-  items: Array<{ href: string; label: string; icon: AstroComponent; active: boolean }>;
+  items: Array<{ href: string; label: string; icon: IconComponent; active: boolean; badge?: number }>;
   user?: { name?: string | null; email?: string | null };
   class?: string;
 }
@@ -37,7 +37,7 @@ const initials = (user?.name ?? "A")
     className,
   ]}
 >
-  <PanelLeft class="size-5" />
+  <Bars3 class="size-5" />
 </button>
 
 <dialog id={dialogId} class="menu-dialog" aria-label="Menu navigasi">
@@ -56,7 +56,7 @@ const initials = (user?.name ?? "A")
         aria-label="Tutup menu"
         class="-mr-1 grid size-9 shrink-0 place-items-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
       >
-        <X class="size-5" />
+        <XMark class="size-5" />
       </button>
     </div>
 
@@ -68,7 +68,7 @@ const initials = (user?.name ?? "A")
         data-signout
         class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
       >
-        <LogOut class="size-4 shrink-0" />
+        <ArrowRightOnRectangle class="size-4 shrink-0" />
         Keluar
       </a>
     </div>

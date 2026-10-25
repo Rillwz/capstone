@@ -1,10 +1,10 @@
 ---
 // The dashboard menu list, defined once. The layout docks it in the lg+ sidebar, and
 // the floating drawer (SidebarMenu) renders the same markup below lg.
-import type { AstroComponent } from "@lucide/astro";
+import type { IconComponent } from "../../lib/icons";
 
 interface Props {
-  items: Array<{ href: string; label: string; icon: AstroComponent; active: boolean }>;
+  items: Array<{ href: string; label: string; icon: IconComponent; active: boolean; badge?: number }>;
   ariaLabel?: string;
   class?: string;
 }
@@ -16,11 +16,12 @@ const { items, ariaLabel = "Navigasi dasbor", class: className } = Astro.props;
   <p class="px-3 pb-2 text-xs font-medium tracking-wider text-slate-400 uppercase">Menu</p>
   <ul class="space-y-1">
     {
-      items.map(({ href, label, icon: Icon, active }) => (
+      items.map(({ href, label, icon: Icon, active, badge }) => (
         <li>
           <a
             href={href}
             aria-current={active ? "page" : undefined}
+            aria-label={badge ? `${label}: ${badge} menunggu` : undefined}
             class:list={[
               "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
               active
@@ -30,6 +31,18 @@ const { items, ariaLabel = "Navigasi dasbor", class: className } = Astro.props;
           >
             <Icon class="size-4 shrink-0" />
             <span class="flex-1">{label}</span>
+            {
+              // Angka notifikasi: aria-label di link sudah memuat jumlahnya, jadi angka
+              // merah ini dekoratif bagi pembaca layar.
+              badge ? (
+                <span
+                  aria-hidden="true"
+                  class="grid min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-5 text-oninverse"
+                >
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              ) : null
+            }
           </a>
         </li>
       ))

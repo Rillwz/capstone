@@ -3,11 +3,13 @@
 // sidebar beside the content; below lg the same list slides in from the header trigger
 // (SidebarMenu), so there is one source for the nav either way. Only the list and the
 // brand link differ per role.
-import { Bell, LayoutDashboard, LogOut, Newspaper, Tags, ClipboardCheck, RotateCcwClock, UserRound, Users } from "@lucide/astro";
+import { Bell, Squares2x2, ArrowRightOnRectangle, Newspaper, Tag, ClipboardDocumentCheck, Clock, User, Users, Bolt, Key } from "../lib/icons";
 import SidebarMenu from "../components/admin/SidebarMenu.astro";
 import SidebarNav from "../components/admin/SidebarNav.astro";
+import InboxDialog from "../components/user/InboxDialog.astro";
 import ThemeToggle from "../components/ui/ThemeToggle.astro";
-import { countUnseenAssignments } from "../lib/db";
+import ToastRegion from "../components/ui/ToastRegion.astro";
+import { countPendingPasswordResets, listNewAssignments } from "../lib/db";
 import Layout from "./Layout.astro";
 
 interface Props {
@@ -21,25 +23,38 @@ const isAdmin = user?.role === 0;
 
 // Lonceng dihitung di sini, bukan lewat prop: layout ini dipakai sepuluh halaman, dan
 // satu halaman baru yang lupa mengisi prop akan diam-diam menghilangkan notifikasinya.
+// Daftarnya ikut dibaca di sini supaya dialognya berfungsi dari halaman mana pun.
 const userId = Number(user?.id);
-const unseen = !isAdmin && Number.isInteger(userId) ? countUnseenAssignments(userId) : 0;
+const inbox = !isAdmin && Number.isInteger(userId) ? listNewAssignments(userId) : [];
+const unseen = inbox.length;
 const unseenLabel = `Pekerjaan masuk: ${unseen} belum dibaca`;
+
+// Notifikasi "Lupa kata sandi" — hanya admin yang punya halaman permintaan reset.
+// Dihitung di sini, seperti lonceng, supaya setiap halaman admin ikut menampilkannya.
+const pendingResets = isAdmin ? countPendingPasswordResets() : 0;
 
 const nav = isAdmin
   ? [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/dashboard/assignments", label: "Penugasan", icon: ClipboardCheck },
+      { href: "/dashboard", label: "Dashboard", icon: Squares2x2 },
+      { href: "/dashboard/assignments", label: "Penugasan", icon: ClipboardDocumentCheck },
+      { href: "/instruksi", label: "Instruksi", icon: Bolt },
       { href: "/dashboard/posts", label: "Postingan", icon: Newspaper },
-      { href: "/dashboard/categories", label: "Kategori", icon: Tags },
+      { href: "/dashboard/categories", label: "Kategori", icon: Tag },
       { href: "/dashboard/users", label: "Pengguna", icon: Users },
-      { href: "/profile", label: "Profil", icon: UserRound },
+      {
+        href: "/dashboard/permintaan-reset",
+        label: "Reset",
+        icon: Key,
+        badge: pendingResets,
+      },
+      { href: "/profile", label: "Profil", icon: User },
     ]
   : [
-      { href: "/user", label: "Dashboard", icon: LayoutDashboard },
-      // Hanya atasan (level 1) yang boleh memberi penugasan langsung.
-      ...(user?.role === 1 ? [{ href: "/user/penugasan", label: "Penugasan", icon: ClipboardCheck }] : []),
-      { href: "/user/riwayat", label: "Riwayat", icon: RotateCcwClock },
-      { href: "/profile", label: "Profil", icon: UserRound },
+      { href: "/user", label: "Dashboard", icon: Squares2x2 },
+      // Hanya atasan (level 1) yang boleh memberi instruksi.
+      ...(user?.role === 1 ? [{ href: "/user/penugasan", label: "Instruksi", icon: ClipboardDocumentCheck }] : []),
+      { href: "/user/riwayat", label: "Riwayat", icon: Clock },
+      { href: "/profile", label: "Profil", icon: User },
     ];
 
 const home = isAdmin ? "/dashboard" : "/user";
@@ -62,22 +77,32 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
         <div class="ml-auto flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           {
-            unseen > 0 && (
+            !isAdmin && (
+              // Lonceng selalu ada supaya posisinya tidak bergeser; angka merahnya yang
+              // muncul-hilang mengikuti jumlah yang belum dibaca. Kliknya membuka dialog,
+              // bukan melompat ke bagian halaman. href-nya fallback tanpa JavaScript.
               <a
-                href="/user#pekerjaan-masuk"
+                href="/user?inbox=1"
+                data-inbox-open
                 data-bell
-                aria-label={unseenLabel}
-                title={unseenLabel}
+                data-unseen={unseen > 0 ? "1" : "0"}
+                aria-haspopup="dialog"
+                aria-controls="inbox-dialog"
+                aria-expanded="false"
+                aria-label={unseen > 0 ? unseenLabel : "Pekerjaan masuk"}
+                title={unseen > 0 ? unseenLabel : "Pekerjaan masuk"}
                 class="relative grid size-9 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
               >
                 <Bell class="size-4" />
-                <span
-                  data-bell-count
-                  aria-hidden="true"
-                  class="absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-4 text-white"
-                >
-                  {unseen > 99 ? "99+" : unseen}
-                </span>
+                {unseen > 0 && (
+                  <span
+                    data-bell-count
+                    aria-hidden="true"
+                    class="absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-4 text-oninverse"
+                  >
+                    {unseen > 99 ? "99+" : unseen}
+                  </span>
+                )}
               </a>
             )
           }
@@ -87,7 +112,7 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
             data-signout
             class="hidden items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 lg:inline-flex"
           >
-            <LogOut class="size-4" />
+            <ArrowRightOnRectangle class="size-4" />
             Keluar
           </a>
         </div>
@@ -112,11 +137,22 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
       </main>
     </div>
   </div>
+
+  <!-- Dialog "Pekerjaan masuk": satu-satunya isi lonceng, dipakai semua halaman.
+       ?inbox=1 membukanya dari server untuk jalur tanpa JavaScript. -->
+  {!isAdmin && <InboxDialog items={inbox} open={Astro.url.searchParams.get("inbox") === "1"} />}
+
+  <!-- Satu tumpukan toast untuk seluruh area; src/scripts/toast.ts mengisinya. -->
+  <ToastRegion />
 </Layout>
 
 <script>
   // Micro-animations for the whole dashboard: one kit, one timing vocabulary.
   import "../scripts/motion.ts";
+
+  // The toast region lives in the layout, so the module that fills it (and drains the
+  // redirect flashes) has to load on every page, including those without their own script.
+  import "../scripts/toast.ts";
 
   // "Keluar" signs out immediately: the plain link stays as the no-JS fallback, but with
   // JS we post the CSRF-protected signout instead of landing on Auth.js' confirm page.

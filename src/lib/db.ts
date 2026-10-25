@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ActivityInput, Periode } from "./activities";
-import { currentPeriod, dbDateToIso, dueDate, pastPeriods, periodFromKey, todayIso } from "./tasks";
+import { activePeriod, currentPeriod, dbDateToIso, dueDate, pastPeriods, periodFromKey, todayIso } from "./tasks";
 
 // SQLite database lives in /data at project root.
 const dataDir = join(process.cwd(), "data");
@@ -12,7 +12,7 @@ const db = new Database(join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 
 /**
- * Unit sistem tempat aktivitas hasil "Penugasan Langsung" bermuara. Aktivitas yang
+ * Unit sistem tempat aktivitas hasil "Instruksi" bermuara. Aktivitas yang
  * lahir dari dialog itu tetap harus punya unit; satu unit khusus membuatnya mudah
  * ditelusuri dan tidak mengotori tiap-tiap unit kerja.
  */
@@ -61,6 +61,20 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_login_logs_user ON login_logs (user_id, id DESC);
 
+  -- Permintaan "Lupa kata sandi" dari halaman login. Tidak ada token: baris ini
+  -- tidak memberi akses apa pun, admin yang mengeksekusi reset di /dashboard.
+  CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'reset', 'rejected')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    handled_at TEXT
+  );
+
+  -- Sebagian besar query hanya peduli yang masih menunggu, jadi indeks parsial.
+  CREATE INDEX IF NOT EXISTS idx_reset_requests_pending ON password_reset_requests (status) WHERE status = 'pending';
+
   -- Work units (kategori). Ikon disimpan sebagai kunci teks (lihat ICON_PALETTE di
   -- lib/categories.ts); urutan tampil mengikuti kolom position.
   CREATE TABLE IF NOT EXISTS categories (
@@ -97,7 +111,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id TEXT NOT NULL,
     name TEXT NOT NULL,
-    date TEXT NOT NULL,
+    -- Rentang berlaku: "YYYY-MM-DD". '' = tanpa batas di ujung itu.
+    start_date TEXT NOT NULL DEFAULT '',
+    end_date TEXT NOT NULL DEFAULT '',
     utama INTEGER NOT NULL DEFAULT 0 CHECK (utama IN (0, 1)),
     periodik INTEGER NOT NULL DEFAULT 0 CHECK (periodik IN (0, 1)),
     bukan_tupoksi INTEGER NOT NULL DEFAULT 0 CHECK (bukan_tupoksi IN (0, 1)),
@@ -121,7 +137,7 @@ db.exec(`
     seen_at TEXT,
     -- Siapa yang menugaskan. NULL = baris lama, dianggap diberikan sistem.
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    -- '' = diberikan lewat katalog, 'langsung' = lahir dari dialog Penugasan Langsung.
+    -- '' = diberikan lewat katalog, 'langsung' = lahir dari dialog Instruksi.
     origin TEXT NOT NULL DEFAULT '',
     UNIQUE (user_id, activity_id)
   );
@@ -213,7 +229,7 @@ if (!assignmentColumns.some((column) => column.name === "seen_at")) {
   `);
 }
 
-// Migration: `created_by` + `origin` lahir bersama Penugasan Langsung. Baris lama
+// Migration: `created_by` + `origin` lahir bersama Instruksi. Baris lama
 // dianggap diberikan sistem (created_by NULL, origin ''), jadi tidak perlu diisi.
 if (!assignmentColumns.some((column) => column.name === "created_by")) {
   db.exec("ALTER TABLE assignments ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;");
@@ -222,13 +238,22 @@ if (!assignmentColumns.some((column) => column.name === "origin")) {
   db.exec("ALTER TABLE assignments ADD COLUMN origin TEXT NOT NULL DEFAULT '';");
 }
 
-// Unit sistem tempat aktivitas hasil Penugasan Langsung bermuara. Dibuat idempoten,
+// Unit sistem tempat aktivitas hasil Instruksi bermuara. Dibuat idempoten,
 // seperti seed 11 unit di atas; position di paling akhir.
 if (!db.prepare("SELECT 1 FROM categories WHERE id = ?").get(DIRECT_CATEGORY)) {
   db.prepare(
     "INSERT INTO categories (id, label, icon, position) VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM categories))",
-  ).run(DIRECT_CATEGORY, "Penugasan Langsung", "zap");
+  ).run(DIRECT_CATEGORY, "Instruksi", "zap");
 }
+
+// Unit itu sudah ada di database lama dengan label lamanya; admin boleh mengganti label
+// unit lain, tapi unit sistem ini tidak muncul di layar pengelolaan — jadi namanya
+// diselaraskan di sini, bukan dibiarkan berbeda dari yang tertulis di menu.
+db.prepare("UPDATE categories SET label = ? WHERE id = ? AND label = ?").run(
+  "Instruksi",
+  DIRECT_CATEGORY,
+  "Penugasan Langsung",
+);
 
 // Migration: the period vocabulary grew (Triwulan, Tahunan, Kegiatan — kosakata MPP).
 // The CHECK constraint lives inside the table definition, so a stale table is rebuilt.
@@ -257,6 +282,39 @@ if (activitiesSchema && !activitiesSchema.sql.includes("'Triwulan'")) {
     );
     INSERT INTO activities_new (id, category_id, name, date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at)
       SELECT id, category_id, name, date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at FROM activities;
+    DROP TABLE activities;
+    ALTER TABLE activities_new RENAME TO activities;
+    CREATE INDEX IF NOT EXISTS idx_activities_category ON activities (category_id, id);
+  `);
+  db.pragma("foreign_keys = ON");
+}
+
+// Migration: satu kolom `date` (hanya harinya yang bermakna) menjadi rentang berlaku
+// `start_date` + `end_date`. Nilai lama dipetakan apa adanya ke `start_date` — hari itu
+// tetap jadi anchor jatuh tempo bulanan, jadi tidak ada perilaku yang berubah dan tidak
+// ada tanggal yang dikarang. `end_date` dibiarkan kosong: berulang tanpa batas.
+const rangeColumns = db.prepare("PRAGMA table_info(activities)").all() as Array<{ name: string }>;
+if (rangeColumns.some((column) => column.name === "date")) {
+  db.pragma("foreign_keys = OFF");
+  db.exec(`
+    CREATE TABLE activities_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      start_date TEXT NOT NULL DEFAULT '',
+      end_date TEXT NOT NULL DEFAULT '',
+      utama INTEGER NOT NULL DEFAULT 0 CHECK (utama IN (0, 1)),
+      periodik INTEGER NOT NULL DEFAULT 0 CHECK (periodik IN (0, 1)),
+      bukan_tupoksi INTEGER NOT NULL DEFAULT 0 CHECK (bukan_tupoksi IN (0, 1)),
+      periode TEXT NOT NULL CHECK (periode IN ('Harian', 'Mingguan', 'Bulanan', 'Triwulan', 'Semesteran', 'Tahunan', 'Kegiatan')),
+      frequency INTEGER NOT NULL DEFAULT 0,
+      minutes INTEGER NOT NULL,
+      sdm INTEGER NOT NULL,
+      volume INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO activities_new (id, category_id, name, start_date, end_date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at)
+      SELECT id, category_id, name, date, '', utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume, created_at FROM activities;
     DROP TABLE activities;
     ALTER TABLE activities_new RENAME TO activities;
     CREATE INDEX IF NOT EXISTS idx_activities_category ON activities (category_id, id);
@@ -310,7 +368,7 @@ export function updateCategory(id: string, label: string, icon: string): boolean
 }
 
 /** Hapus kategori beserta aktivitas, penugasan, log dan catatannya.
- *  Unit sistem (Penugasan Langsung) ditolak: `activities.category_id` tidak punya
+ *  Unit sistem (Instruksi) ditolak: `activities.category_id` tidak punya
  *  foreign key, jadi tanpanya aktivitasnya jadi yatim tanpa unit. */
 export function deleteCategory(id: string): boolean {
   if (id === DIRECT_CATEGORY) return false;
@@ -384,6 +442,85 @@ export function updateUserAccount(
     .prepare("UPDATE users SET name = ?, email = ?, jabatan = ?, role = ? WHERE id = ?")
     .run(name, email.toLowerCase(), jabatan.trim(), role, id);
   return info.changes > 0;
+}
+
+/**
+ * Catat permintaan "Lupa kata sandi". Satu akun hanya boleh punya satu permintaan
+ * yang masih menunggu, supaya daftar admin tidak dibanjiri klik berulang.
+ * "unknown" untuk email yang tidak terdaftar — pemanggil menampilkan pesan yang
+ * sama, jadi hasil ini tidak boleh bocor ke layar.
+ */
+export function createPasswordResetRequest(email: string): "created" | "duplicate" | "unknown" {
+  const user = getUserByEmail(email);
+  if (!user) return "unknown";
+  const pending = db
+    .prepare("SELECT 1 FROM password_reset_requests WHERE user_id = ? AND status = 'pending'")
+    .get(user.id);
+  if (pending) return "duplicate";
+  db.prepare("INSERT INTO password_reset_requests (user_id) VALUES (?)").run(user.id);
+  return "created";
+}
+
+export function countPendingPasswordResets(): number {
+  return (
+    db.prepare("SELECT count(*) AS n FROM password_reset_requests WHERE status = 'pending'").get() as {
+      n: number;
+    }
+  ).n;
+}
+
+export interface PasswordResetRow {
+  id: number;
+  user_id: number;
+  name: string;
+  email: string;
+  jabatan: string;
+  status: "pending" | "reset" | "rejected";
+  created_at: string;
+  handled_at: string | null;
+  handled_by_name: string | null;
+}
+
+/** Permintaan reset, yang menunggu lebih dulu lalu yang sudah ditangani (terbaru dulu). */
+export function listPasswordResets(limit = 50): PasswordResetRow[] {
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id, u.name, u.email, u.jabatan, r.status, r.created_at, r.handled_at,
+              a.name AS handled_by_name
+       FROM password_reset_requests r
+       JOIN users u ON u.id = r.user_id
+       LEFT JOIN users a ON a.id = r.handled_by
+       ORDER BY r.status = 'pending' DESC, r.id DESC
+       LIMIT ?`,
+    )
+    .all(limit) as PasswordResetRow[];
+}
+
+/**
+ * Tutup satu permintaan: "reset" menimpa kata sandi akun (hash dihitung pemanggil,
+ * karena bcrypt asinkron) lalu menandai selesai, "rejected" hanya menandai.
+ * Hanya baris yang masih 'pending' yang bisa ditangani.
+ */
+export function handlePasswordReset(
+  id: number,
+  adminId: number,
+  action: "reset" | "rejected",
+  passwordHash?: string,
+): boolean {
+  return db.transaction(() => {
+    const row = db.prepare("SELECT user_id FROM password_reset_requests WHERE id = ? AND status = 'pending'").get(id) as
+      | { user_id: number }
+      | undefined;
+    if (!row) return false;
+    if (action === "reset") {
+      if (!passwordHash) return false;
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, row.user_id);
+    }
+    db.prepare(
+      "UPDATE password_reset_requests SET status = ?, handled_by = ?, handled_at = datetime('now') WHERE id = ?",
+    ).run(action, adminId, id);
+    return true;
+  })();
 }
 
 export interface PositionRow {
@@ -614,7 +751,8 @@ export interface ActivityRow {
   id: number;
   category_id: string;
   name: string;
-  date: string;
+  start_date: string;
+  end_date: string;
   utama: number;
   periodik: number;
   bukan_tupoksi: number;
@@ -628,20 +766,21 @@ export interface ActivityRow {
 
 export function listActivities(categoryId: string): ActivityRow[] {
   return db
-    .prepare("SELECT * FROM activities WHERE category_id = ? ORDER BY date DESC, id DESC")
+    .prepare("SELECT * FROM activities WHERE category_id = ? ORDER BY start_date DESC, id DESC")
     .all(categoryId) as ActivityRow[];
 }
 
 export function createActivity(categoryId: string, input: ActivityInput): number {
   const info = db
     .prepare(
-      `INSERT INTO activities (category_id, name, date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO activities (category_id, name, start_date, end_date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm, volume)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       categoryId,
       input.name,
-      input.date,
+      input.start_date,
+      input.end_date,
       Number(input.utama),
       Number(input.periodik),
       Number(input.bukan_tupoksi),
@@ -658,12 +797,13 @@ export function createActivity(categoryId: string, input: ActivityInput): number
 export function updateActivity(id: number, categoryId: string, input: ActivityInput): void {
   db.prepare(
     `UPDATE activities
-     SET name = ?, date = ?, utama = ?, periodik = ?, bukan_tupoksi = ?, periode = ?,
+     SET name = ?, start_date = ?, end_date = ?, utama = ?, periodik = ?, bukan_tupoksi = ?, periode = ?,
          frequency = ?, minutes = ?, sdm = ?, volume = ?
      WHERE id = ? AND category_id = ?`,
   ).run(
     input.name,
-    input.date,
+    input.start_date,
+    input.end_date,
     Number(input.utama),
     Number(input.periodik),
     Number(input.bukan_tupoksi),
@@ -767,9 +907,19 @@ export function createAssignmentsBulk(
   return added;
 }
 
-/** Insert one assignment per chosen activity for a single user. */
-export function createAssignments(userId: number, activityIds: number[]): number {
-  return createAssignmentsBulk([userId], activityIds);
+/**
+ * Insert one assignment per chosen activity for a single user.
+ *
+ * `createdBy` is recorded so the recipient can see who handed the task over. The origin
+ * stays "" — these come from the shared catalog, so they must not show up in the
+ * Instruksi tracker or become removable through `deleteDirectAssignment`.
+ */
+export function createAssignments(
+  userId: number,
+  activityIds: number[],
+  createdBy: number | null = null,
+): number {
+  return createAssignmentsBulk([userId], activityIds, createdBy);
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +936,9 @@ export interface NewAssignment {
   category_id: string;
   periode: string;
   created_at: string;
+  /** Siapa yang memberi; null untuk baris lama yang diberikan sistem. */
+  giver_name: string | null;
+  giver_email: string | null;
 }
 
 /** Jumlah penugasan yang belum dibaca — angka di lonceng. */
@@ -800,8 +953,11 @@ export function countUnseenAssignments(userId: number): number {
 export function listNewAssignments(userId: number): NewAssignment[] {
   return db
     .prepare(
-      `SELECT g.id, g.activity_id, ac.name, g.category_id, ac.periode, g.created_at
-       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+      `SELECT g.id, g.activity_id, ac.name, g.category_id, ac.periode, g.created_at,
+              gv.name AS giver_name, gv.email AS giver_email
+       FROM assignments g
+       JOIN activities ac ON ac.id = g.activity_id
+       LEFT JOIN users gv ON gv.id = g.created_by
        WHERE g.user_id = ? AND g.seen_at IS NULL
        ORDER BY g.created_at DESC, g.id DESC`,
     )
@@ -816,20 +972,9 @@ export function markAssignmentsSeen(userId: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Penugasan Langsung: aktivitas master yang lahir bersama penugasannya.
+// Instruksi: aktivitas master yang lahir bersama penugasannya.
 // Hidup di unit sistem DIRECT_CATEGORY, dan mencatat siapa yang memberikannya.
 // ---------------------------------------------------------------------------
-
-export interface DirectAssignmentRow {
-  id: number;
-  activity_id: number;
-  name: string;
-  periode: string;
-  user_id: number;
-  user_name: string;
-  jabatan: string;
-  created_at: string;
-}
 
 /**
  * Buat aktivitas + tugaskan, dalam satu transaksi.
@@ -837,8 +982,9 @@ export interface DirectAssignmentRow {
  * Nama (tanpa peduli huruf besar/kecil) + periode yang sama di unit sistem dipakai
  * ulang, bukan diduplikasi — "Buat MasterDB" justru soal master yang bersih.
  *
- * shortcut: kecocokan mengabaikan `day`, jadi dua pekerjaan dengan nama & periode
- * sama dianggap satu definisi. Cocokkan `date` juga kalau kelak perlu varian tanggal.
+ * shortcut: kecocokan mengabaikan rentang berlaku, jadi dua pekerjaan dengan nama &
+ * periode sama dianggap satu definisi. Cocokkan `start_date`/`end_date` juga kalau kelak
+ * perlu varian tanggal.
  */
 export function createDirectAssignment(
   input: ActivityInput,
@@ -867,31 +1013,163 @@ export function createDirectAssignment(
   })();
 }
 
-/** Penugasan langsung yang diberikan satu orang, terbaru dulu. */
-export function listDirectAssignmentsBy(createdBy: number): DirectAssignmentRow[] {
-  return db
+/** Satu periode dalam riwayat sebuah penugasan. */
+export type PeriodState = "selesai" | "terlewat" | "berjalan";
+
+export interface GivenPeriod {
+  key: string;
+  state: PeriodState;
+  /** Hari periode itu seharusnya selesai. */
+  due: string;
+  completed_at: string | null;
+}
+
+export interface GivenAssignmentRow {
+  id: number;
+  activity_id: number;
+  name: string;
+  periode: Periode;
+  created_at: string;
+  /** Rentang berlaku aktivitas; "" = terbuka. */
+  start_date: string;
+  end_date: string;
+  user_id: number;
+  user_name: string;
+  user_email: string;
+  jabatan: string;
+  /** Periode terlama → terbaru, untuk strip timeline. */
+  periods: GivenPeriod[];
+  done: number;
+  missed: number;
+  /** Periode berjalan yang belum dicentang. */
+  open: number;
+  /** Ringkasan: belum mulai → belum; ada yang terlewat → terlambat; beres semua → selesai. */
+  status: "belum" | "selesai" | "berjalan" | "terlambat";
+}
+
+/**
+ * Instruksi yang diberikan satu orang, beserta progres tiap periode.
+ *
+ * Progres dihitung dari `activity_logs` di sini, bukan dengan membaca hasil
+ * `materializeOverdue` — fungsi itu hanya berjalan saat penerima membuka berandanya,
+ * jadi pemberi akan melihat "belum ada yang terlewat" untuk pegawai yang tidak pernah
+ * login. Rumus periodenya sama (`pastPeriods` + `currentPeriod`), jadi angkanya tetap
+ * cocok dengan yang dilihat penerima.
+ *
+ * Diurutkan dari yang paling perlu perhatian: ada periode terlewat lebih dulu.
+ */
+export function listGivenAssignments(createdBy: number, onlyUnfinished = false): GivenAssignmentRow[] {
+  const rows = db
     .prepare(
-      `SELECT g.id, g.activity_id, ac.name, ac.periode, g.user_id,
-              u.name AS user_name, u.jabatan, g.created_at
+      `SELECT g.id, g.activity_id, g.created_at, g.user_id,
+              ac.name, ac.periode, ac.start_date, ac.end_date,
+              u.name AS user_name, u.email AS user_email, u.jabatan
        FROM assignments g
        JOIN activities ac ON ac.id = g.activity_id
        JOIN users u ON u.id = g.user_id
        WHERE g.created_by = ? AND g.origin = 'langsung'
        ORDER BY g.created_at DESC, g.id DESC`,
     )
-    .all(createdBy) as DirectAssignmentRow[];
-}
+    .all(createdBy) as Array<{
+    id: number;
+    activity_id: number;
+    created_at: string;
+    user_id: number;
+    name: string;
+    periode: Periode;
+    start_date: string;
+    end_date: string;
+    user_name: string;
+    user_email: string;
+    jabatan: string;
+  }>;
 
-/** Jumlah penugasan langsung yang diberikan satu orang. */
-export function countDirectAssignmentsBy(createdBy: number): number {
-  const row = db
-    .prepare("SELECT count(*) AS n FROM assignments WHERE created_by = ? AND origin = 'langsung'")
-    .get(createdBy) as { n: number };
-  return row.n;
+  if (rows.length === 0) return [];
+
+  const logs = db
+    .prepare(
+      `SELECT l.activity_id, l.user_id, l.period_key, l.status, l.completed_at
+       FROM activity_logs l
+       JOIN assignments g ON g.user_id = l.user_id AND g.activity_id = l.activity_id
+       WHERE g.created_by = ? AND g.origin = 'langsung'`,
+    )
+    .all(createdBy) as Array<{
+    activity_id: number;
+    user_id: number;
+    period_key: string;
+    status: "selesai" | "terlewat";
+    completed_at: string | null;
+  }>;
+
+  const index = new Map(logs.map((log) => [`${log.user_id}|${log.activity_id}|${log.period_key}`, log]));
+  const today = todayIso();
+
+  const out = rows.map((row): GivenAssignmentRow => {
+    // Rentang berlaku: mulai paling cepat pada start_date, dan berhenti pada end_date.
+    // Tugas yang belum mulai belum punya periode sama sekali; yang sudah lewat tenggat
+    // punya periode terakhir di sekitar end_date, bukan periode hari ini.
+    const given = dbDateToIso(row.created_at);
+    const from = row.start_date && row.start_date > given ? row.start_date : given;
+    const notStarted = row.start_date !== "" && today < row.start_date;
+    const ended = row.end_date !== "" && today > row.end_date;
+    const anchor = ended ? row.end_date : today;
+    const boundary = currentPeriod(row.periode, anchor);
+
+    const keys: Array<{ key: string; current: boolean }> = notStarted
+      ? []
+      : [
+          ...pastPeriods(row.periode, from, boundary, row.end_date).map((period) => ({
+            key: period.key,
+            current: false,
+          })),
+          { key: boundary.key, current: !ended },
+        ];
+
+    const periods: GivenPeriod[] = keys.map(({ key, current: isCurrent }) => {
+      const log = index.get(`${row.user_id}|${row.activity_id}|${key}`);
+      // Periode lampau tanpa log = terlewat, meski `materializeOverdue` belum sempat
+      // mencatatnya. Itu yang akan dilihat penerima begitu ia membuka berandanya.
+      const state: PeriodState =
+        log?.status === "selesai" ? "selesai" : log?.status === "terlewat" || !isCurrent ? "terlewat" : "berjalan";
+      return {
+        key,
+        state,
+        due: dueDate(row.periode, periodFromKey(row.periode, key), row.start_date, row.end_date),
+        completed_at: log?.status === "selesai" ? (log.completed_at ?? null) : null,
+      };
+    });
+
+    const done = periods.filter((period) => period.state === "selesai").length;
+    const missed = periods.filter((period) => period.state === "terlewat").length;
+    const open = periods.filter((period) => period.state === "berjalan").length;
+
+    return {
+      id: row.id,
+      activity_id: row.activity_id,
+      name: row.name,
+      periode: row.periode,
+      created_at: row.created_at,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      user_id: row.user_id,
+      user_name: row.user_name,
+      user_email: row.user_email,
+      jabatan: row.jabatan,
+      periods,
+      done,
+      missed,
+      open,
+      status: notStarted ? "belum" : missed > 0 ? "terlambat" : open > 0 ? "berjalan" : "selesai",
+    };
+  });
+
+  const filtered = onlyUnfinished ? out.filter((row) => row.status !== "selesai") : out;
+  // Yang punya terlewat didahulukan; sisanya tetap terbaru dulu (urutan dari query).
+  return [...filtered].sort((a, b) => Number(b.missed > 0) - Number(a.missed > 0));
 }
 
 /**
- * Lepas satu penugasan langsung. Hanya baris yang memang diberikan `createdBy` itu —
+ * Lepas satu instruksi. Hanya baris yang memang diberikan `createdBy` itu —
  * level 1 tidak boleh mencabut penugasan yang diberikan admin.
  */
 export function deleteDirectAssignment(assignmentId: number, createdBy: number): boolean {
@@ -955,6 +1233,9 @@ export interface UserOccurrence {
   /** Catatan & tautan yang menempel pada kemunculan ini. */
   note: string;
   link: string;
+  /** Siapa yang menugaskan; null untuk baris lama tanpa pemberi. */
+  giver_name: string | null;
+  giver_email: string | null;
 }
 
 /** Kemunculan yang terlewat dari satu aktivitas, digabung jadi satu baris. */
@@ -995,11 +1276,17 @@ export interface HistoryRow {
 export function materializeOverdue(userId: number): void {
   const rows = db
     .prepare(
-      `SELECT g.activity_id, g.created_at, ac.periode, ac.date
+      `SELECT g.activity_id, g.created_at, ac.periode, ac.start_date, ac.end_date
        FROM assignments g JOIN activities ac ON ac.id = g.activity_id
        WHERE g.user_id = ?`,
     )
-    .all(userId) as Array<{ activity_id: number; created_at: string; periode: Periode; date: string }>;
+    .all(userId) as Array<{
+    activity_id: number;
+    created_at: string;
+    periode: Periode;
+    start_date: string;
+    end_date: string;
+  }>;
 
   const today = todayIso();
   const insert = db.prepare(
@@ -1009,9 +1296,20 @@ export function materializeOverdue(userId: number): void {
 
   db.transaction(() => {
     for (const row of rows) {
-      const current = currentPeriod(row.periode, today);
-      for (const period of pastPeriods(row.periode, dbDateToIso(row.created_at), current)) {
+      const given = dbDateToIso(row.created_at);
+      const from = row.start_date && row.start_date > given ? row.start_date : given;
+      // Tugas yang belum mulai belum punya periode untuk dicatat.
+      if (row.start_date && today < row.start_date) continue;
+      // Tugas yang tenggatnya sudah lewat berhenti di periode yang memuat end_date.
+      const anchor = row.end_date && today > row.end_date ? row.end_date : today;
+      const boundary = currentPeriod(row.periode, anchor);
+      for (const period of pastPeriods(row.periode, from, boundary, row.end_date)) {
         insert.run(userId, row.activity_id, period.key);
+      }
+      // Tenggat yang sudah lewat: periode terakhirnya ikut dicatat sebagai terlewat,
+      // supaya penerima melihatnya sekali, bukan menghilang tanpa jejak.
+      if (row.end_date && today > row.end_date) {
+        insert.run(userId, row.activity_id, boundary.key);
       }
     }
   })();
@@ -1021,8 +1319,12 @@ export function materializeOverdue(userId: number): void {
 export function listUserOccurrences(userId: number): UserOccurrence[] {
   const rows = db
     .prepare(
-      `SELECT ac.id AS activity_id, ac.name, ac.category_id, ac.periode, ac.minutes, ac.sdm, ac.date
-       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+      `SELECT ac.id AS activity_id, ac.name, ac.category_id, ac.periode, ac.minutes, ac.sdm,
+              ac.start_date, ac.end_date,
+              gv.name AS giver_name, gv.email AS giver_email
+       FROM assignments g
+       JOIN activities ac ON ac.id = g.activity_id
+       LEFT JOIN users gv ON gv.id = g.created_by
        WHERE g.user_id = ?
        ORDER BY ac.category_id, ac.name COLLATE NOCASE`,
     )
@@ -1033,7 +1335,10 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
     periode: Periode;
     minutes: number;
     sdm: number;
-    date: string;
+    start_date: string;
+    end_date: string;
+    giver_name: string | null;
+    giver_email: string | null;
   }>;
 
   const today = todayIso();
@@ -1048,26 +1353,34 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
   const index = new Map(logs.map((log) => [`${log.activity_id}|${log.period_key}`, log]));
   const notes = listOccurrenceNotes(userId);
 
-  return rows.map((row) => {
-    const period = currentPeriod(row.periode, today);
-    const due = dueDate(row.periode, period, row.date);
-    const log = index.get(`${row.activity_id}|${period.key}`);
-    const done = log?.status === "selesai";
-    const completedAt = done ? log.completed_at : null;
-    const note = notes.get(`${row.activity_id}|${period.key}`);
-    return {
-      ...row,
-      period_key: period.key,
-      period_start: period.start,
-      period_end: period.end,
-      due,
-      status: done ? "selesai" : "open",
-      completed_at: completedAt,
-      late: completedAt ? dbDateToIso(completedAt) > due : false,
-      note: note?.note ?? "",
-      link: note?.link ?? "",
-    };
-  });
+  return rows
+    .flatMap((row) => {
+      // Tugas di luar rentang berlakunya tidak punya kemunculan hari ini: belum mulai
+      // atau sudah lewat tenggat. Yang sudah lewat tetap tercatat di riwayat/panel
+      // pemberi, tapi tidak lagi muncul sebagai tugas berjalan.
+      const period = activePeriod(row.periode, today, { start: row.start_date, end: row.end_date });
+      if (!period) return [];
+
+      const due = dueDate(row.periode, period, row.start_date, row.end_date);
+      const log = index.get(`${row.activity_id}|${period.key}`);
+      const done = log?.status === "selesai";
+      const completedAt = done ? log.completed_at : null;
+      const note = notes.get(`${row.activity_id}|${period.key}`);
+      return [
+        {
+          ...row,
+          period_key: period.key,
+          period_start: period.start,
+          period_end: period.end,
+          due,
+          status: (done ? "selesai" : "open") as "selesai" | "open",
+          completed_at: completedAt,
+          late: completedAt ? dbDateToIso(completedAt) > due : false,
+          note: note?.note ?? "",
+          link: note?.link ?? "",
+        },
+      ];
+    });
 }
 
 /** Catatan & tautan satu kemunculan (kosong kalau belum ada). */
@@ -1162,10 +1475,13 @@ export function completeOccurrence(
 ): "selesai" | "terlambat" | "invalid" {
   const activity = db
     .prepare(
-      `SELECT ac.periode, ac.date FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+      `SELECT ac.periode, ac.start_date, ac.end_date
+       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
        WHERE g.user_id = ? AND g.activity_id = ?`,
     )
-    .get(userId, activityId) as { periode: Periode; date: string } | undefined;
+    .get(userId, activityId) as
+    | { periode: Periode; start_date: string; end_date: string }
+    | undefined;
   if (!activity) return "invalid";
 
   const today = todayIso();
@@ -1176,7 +1492,12 @@ export function completeOccurrence(
 
   if (periodKey !== current.key && existing?.status !== "terlewat") return "invalid";
 
-  const due = dueDate(activity.periode, periodFromKey(activity.periode, periodKey), activity.date);
+  const due = dueDate(
+    activity.periode,
+    periodFromKey(activity.periode, periodKey),
+    activity.start_date,
+    activity.end_date,
+  );
   const late = today > due;
 
   db.prepare(
@@ -1209,13 +1530,21 @@ export function undoOccurrence(
 
   const activity = db
     .prepare(
-      `SELECT ac.periode, ac.date FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+      `SELECT ac.periode, ac.start_date, ac.end_date
+       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
        WHERE g.user_id = ? AND g.activity_id = ?`,
     )
-    .get(userId, activityId) as { periode: Periode; date: string } | undefined;
+    .get(userId, activityId) as
+    | { periode: Periode; start_date: string; end_date: string }
+    | undefined;
   if (!activity) return "open";
 
-  const due = dueDate(activity.periode, periodFromKey(activity.periode, periodKey), activity.date);
+  const due = dueDate(
+    activity.periode,
+    periodFromKey(activity.periode, periodKey),
+    activity.start_date,
+    activity.end_date,
+  );
   return due < todayIso() ? "terlewat" : "open";
 }
 
@@ -1233,7 +1562,7 @@ export function listDailyActivity(userId: number): {
 } {
   const rows = db
     .prepare(
-      `SELECT l.status, l.completed_at, l.period_key, ac.periode, ac.date
+      `SELECT l.status, l.completed_at, l.period_key, ac.periode, ac.start_date, ac.end_date
        FROM activity_logs l JOIN activities ac ON ac.id = l.activity_id
        WHERE l.user_id = ?`,
     )
@@ -1242,7 +1571,8 @@ export function listDailyActivity(userId: number): {
     completed_at: string | null;
     period_key: string;
     periode: Periode;
-    date: string;
+    start_date: string;
+    end_date: string;
   }>;
 
   const days = new Map<string, { done: number; missed: number }>();
@@ -1259,7 +1589,7 @@ export function listDailyActivity(userId: number): {
       continue;
     }
     const period = periodFromKey(row.periode, row.period_key);
-    bump(dueDate(row.periode, period, row.date), "missed");
+    bump(dueDate(row.periode, period, row.start_date, row.end_date), "missed");
   }
 
   const years = [...new Set([...days.keys()].map((date) => Number(date.slice(0, 4))))].sort(
@@ -1290,7 +1620,7 @@ export function listHistory(userId: number, status?: "selesai" | "terlewat"): Hi
   const rows = db
     .prepare(
       `SELECT l.id, l.activity_id, l.period_key, l.status, l.completed_at,
-              ac.name, ac.category_id, ac.periode, ac.date
+              ac.name, ac.category_id, ac.periode, ac.start_date, ac.end_date
        FROM activity_logs l JOIN activities ac ON ac.id = l.activity_id
        WHERE l.user_id = ? ${status ? "AND l.status = ?" : ""}
        LIMIT 300`,
@@ -1304,7 +1634,8 @@ export function listHistory(userId: number, status?: "selesai" | "terlewat"): Hi
     name: string;
     category_id: string;
     periode: Periode;
-    date: string;
+    start_date: string;
+    end_date: string;
   }>;
 
   const notes = listOccurrenceNotes(userId);
@@ -1312,7 +1643,7 @@ export function listHistory(userId: number, status?: "selesai" | "terlewat"): Hi
   return rows
     .map((row) => {
       const period = periodFromKey(row.periode, row.period_key);
-      const due = dueDate(row.periode, period, row.date);
+      const due = dueDate(row.periode, period, row.start_date, row.end_date);
       const note = notes.get(noteKey(row.activity_id, row.period_key));
       return {
         id: row.id,

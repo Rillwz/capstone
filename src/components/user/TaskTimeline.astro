@@ -1,0 +1,85 @@
+---
+// Strip riwayat periode satu penugasan: periode lama di kiri, periode berjalan di kanan.
+//
+// Warnanya hanya ada di bulatan, bukan di garis penghubung — satu penugasan berumur satu
+// tahun bisa punya 12 node, dan 12 warna sekaligus berhenti terbaca. Bentuknya juga
+// membedakan state (centang / silang / kosong), jadi tidak bergantung pada warna saja.
+//
+// Garis penghubungnya yang melebar mengisi ruang (bukan node-nya), jadi strip selalu
+// muat: 12 node tetap 12 × 14px, sisanya dibagi ke garis.
+import { Check, XMark } from "../../lib/icons";
+import { formatDateOnly, formatPeriod, formatPeriodShort } from "../../lib/format";
+import type { GivenPeriod } from "../../lib/db";
+
+interface Props {
+  /** Periode terlama → terbaru, sudah dipotong pemanggil. */
+  periods: GivenPeriod[];
+  periode: Parameters<typeof formatPeriodShort>[0];
+  /** Jumlah periode lama yang tidak ditampilkan karena strip terlalu panjang. */
+  hiddenCount?: number;
+}
+
+const { periods, periode, hiddenCount = 0 } = Astro.props;
+
+const first = periods[0];
+const current = periods[periods.length - 1];
+
+/** Tooltip satu node: "Okt 2026 · selesai · 25 Okt 2026". */
+const label = (period: GivenPeriod) => {
+  const parts = [formatPeriod(periode, period.key), period.state];
+  if (period.completed_at) parts.push(formatDateOnly(period.completed_at));
+  return parts.join(" · ");
+};
+---
+
+{
+  periods.length > 0 && (
+    <div class="min-w-0 flex-1">
+      <ol class="flex w-full max-w-md items-center" aria-label="Riwayat periode">
+        {periods.map((period, index) => (
+          <li class="flex min-w-0 flex-1 items-center last:flex-none">
+            <span
+              title={label(period)}
+              data-period-state={period.state}
+              class="grid size-3.5 shrink-0 place-items-center rounded-full"
+            >
+              {period.state === "selesai" && <Check class="size-2.5" aria-hidden="true" />}
+              {period.state === "terlewat" && <XMark class="size-2.5" aria-hidden="true" />}
+              <span class="sr-only">{label(period)}</span>
+            </span>
+            {/* Garis penghubung netral; tidak pernah diwarnai. */}
+            {index < periods.length - 1 && (
+              <span aria-hidden="true" class="mx-0.5 h-px min-w-1 flex-1 bg-slate-200"></span>
+            )}
+          </li>
+        ))}
+      </ol>
+
+      <p class="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-slate-400">
+        {first && <span>{formatPeriodShort(periode, first.key)}</span>}
+        {current && first && current.key !== first.key && (
+          <>
+            <span aria-hidden="true">→</span>
+            <span>{formatPeriodShort(periode, current.key)}</span>
+          </>
+        )}
+        {hiddenCount > 0 && <span>· +{hiddenCount} periode sebelumnya</span>}
+      </p>
+    </div>
+  )
+}
+
+<style>
+  [data-period-state="selesai"] {
+    background-color: var(--color-brand-600);
+    color: var(--color-onbrand);
+  }
+  [data-period-state="terlewat"] {
+    background-color: var(--color-red-600);
+    color: var(--color-white);
+  }
+  [data-period-state="berjalan"] {
+    border: 1.5px solid var(--color-slate-300);
+    background-color: var(--color-white);
+  }
+</style>

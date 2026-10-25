@@ -3,22 +3,20 @@
 // Daftar kategori dibaca dari tabel `categories` (dinamis, dibaca per render). Tambah,
 // edit, dan hapus berjalan lewat Astro Action, lalu halaman dirender ulang oleh router
 // tanpa muat penuh.
-import { ChevronRight, Pencil, Plus, Tags, Trash, X } from "@lucide/astro";
+import { ChevronRight, Pencil, Plus, Tag, Trash, XMark } from "../../lib/icons";
 import Button from "../../components/ui/Button.astro";
 import Input from "../../components/ui/Input.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
-import { ICON_PALETTE, listCategories } from "../../lib/categories";
-import { DIRECT_CATEGORY } from "../../lib/db";
+import { ICON_PALETTE, listCategories, systemCategory } from "../../lib/categories";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
 
 // Dibaca di sini, per request — bukan konstanta modul, yang akan beku setelah perubahan.
+// Unit sistem "Instruksi" tidak ikut: ia bukan unit kerja, jadi ditampilkan terpisah.
 const categories = listCategories();
-// Unit sistem tetap tampil (aktivitasnya nyata), tapi tidak boleh dihapus: tanpa unit,
-// aktivitasnya jadi yatim karena `activities.category_id` tidak punya foreign key.
-const deletable = categories.filter(({ id }) => id !== DIRECT_CATEGORY);
+const system = systemCategory();
 
 // Opsi ikon untuk modal tambah & edit: [kunci, komponen ikon], urut seperti palet.
 const iconOptions = Object.entries(ICON_PALETTE);
@@ -31,7 +29,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
       <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
     </div>
     <div class="flex items-center gap-2">
-      <Button size="sm" variant="danger" type="button" data-delete-open disabled={deletable.length === 0}>
+      <Button size="sm" variant="danger" type="button" data-delete-open disabled={categories.length === 0}>
         <Trash class="size-4" />Hapus
       </Button>
       <Button size="sm" variant="outline" type="button" data-edit-open disabled={categories.length === 0}>
@@ -56,16 +54,6 @@ const iconOptions = Object.entries(ICON_PALETTE);
             <span class="min-w-0 flex-1 text-sm font-medium tracking-wide text-slate-900 uppercase group-hover:text-brand-700">
               {label}
             </span>
-            {
-              id === DIRECT_CATEGORY && (
-                <span
-                  class="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium tracking-normal text-slate-500 normal-case"
-                  title="Unit sistem — dipakai Penugasan Langsung, tidak bisa dihapus"
-                >
-                  Unit sistem
-                </span>
-              )
-            }
             <ChevronRight class="size-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
           </a>
         </li>
@@ -76,10 +64,43 @@ const iconOptions = Object.entries(ICON_PALETTE);
   {
     categories.length === 0 && (
       <div class="mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
-        <Tags class="size-8 text-slate-300" />
+        <Tag class="size-8 text-slate-300" />
         <p class="text-sm font-medium text-slate-900">Belum ada kategori</p>
         <p class="max-w-sm text-sm text-slate-500">Tambahkan unit kerja pertama dengan tombol "Tambah"</p>
       </div>
+    )
+  }
+
+  {/* Unit sistem berdiri sendiri: aktivitasnya nyata, tapi ia bukan unit kerja dan
+       tidak boleh dihapus — tanpa unit, aktivitasnya jadi yatim karena
+       `activities.category_id` tidak punya foreign key. */}
+  {
+    system && (
+      <section class="mt-8" data-reveal="up">
+        <h2 class="text-sm font-semibold text-slate-900">Unit sistem</h2>
+        <p class="mt-1 text-sm text-slate-500">
+          Dipakai dialog Instruksi. Tidak bisa dihapus dan tidak muncul di daftar unit kerja.
+        </p>
+        <a
+          href={`/dashboard/categories/${system.id}`}
+          data-lift
+          class="mt-3 flex max-w-md items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 transition-colors hover:border-brand-300 hover:bg-brand-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+        >
+          <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-slate-500">
+            <system.icon class="size-4" />
+          </span>
+          <span class="min-w-0 flex-1 text-sm font-medium tracking-wide text-slate-700 uppercase">
+            {system.label}
+          </span>
+          <span
+            class="shrink-0 rounded-md bg-slate-200/70 px-1.5 py-0.5 text-[11px] font-medium tracking-normal text-slate-600 normal-case"
+            title="Unit sistem — dipakai Instruksi, tidak bisa dihapus"
+          >
+            Unit sistem
+          </span>
+          <ChevronRight class="size-4 shrink-0 text-slate-400" />
+        </a>
+      </section>
     )
   }
 
@@ -95,7 +116,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
         aria-label="Tutup"
         class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
       >
-        <X class="size-4" />
+        <XMark class="size-4" />
       </button>
     </div>
 
@@ -147,7 +168,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -194,7 +215,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -249,17 +270,17 @@ const iconOptions = Object.entries(ICON_PALETTE);
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
       <div class="mt-4 max-h-[50vh] overflow-y-auto border-y border-slate-200">
         {
-          deletable.length === 0 ? (
+          categories.length === 0 ? (
             <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada kategori untuk dihapus.</p>
           ) : (
             <ul class="divide-y divide-slate-100">
-              {deletable.map(({ id, label }) => (
+              {categories.map(({ id, label }) => (
                 <li>
                   <label class="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50 has-[:focus-visible]:bg-slate-50 sm:px-6">
                     <input type="radio" name="id" value={id} class="size-4 shrink-0 accent-brand-600" />
@@ -274,7 +295,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
 
       <div class="flex flex-col-reverse gap-2 p-5 sm:flex-row sm:justify-end sm:px-6">
         <Button variant="outline" type="button" data-dialog-close>Batal</Button>
-        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={deletable.length === 0}>
+        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={categories.length === 0}>
           <Trash class="size-4" />Hapus
         </Button>
       </div>

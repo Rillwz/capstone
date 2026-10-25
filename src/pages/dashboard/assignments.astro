@@ -7,22 +7,22 @@
 // Aksinya memakai Astro Action (src/actions) — assigning, melepas, dan mengosongkan
 // penugasan tidak memuat ulang halaman.
 import {
-  ClipboardCheck,
-  ClipboardX,
+  ClipboardDocumentCheck,
+  ClipboardDocument,
   Plus,
-  Search,
+  MagnifyingGlass,
   Trash,
-  TriangleAlert,
-  UserRound,
+  ExclamationTriangle,
+  User,
   Users,
-  X,
-  Zap,
-} from "@lucide/astro";
+  XMark,
+  Bolt,
+} from "../../lib/icons";
 import Button from "../../components/ui/Button.astro";
 import DirectAssignDialog from "../../components/admin/DirectAssignDialog.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
-import { listCategories } from "../../lib/categories";
+import { listAllCategories, listCategories } from "../../lib/categories";
 import {
   listActivityCatalog,
   listAssignedActivitiesForUser,
@@ -34,6 +34,9 @@ const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
 
 const members = listUsers().filter((user) => user.role !== 0);
+// Semua unit, termasuk unit sistem — penugasan "langsung" tetap perlu label unitnya.
+const allCategories = listAllCategories();
+// Unit kerja biasa saja: unit sistem "Instruksi" tidak boleh ditugaskan manual dari sini.
 const categories = listCategories();
 const counts = new Map(listAssignmentUsers().map((row) => [row.id, row]));
 
@@ -50,9 +53,10 @@ const assignedIds = new Set(catalog.filter((activity) => activity.assigned).map(
 // pengguna, jadi flag `assigned` selalu 0.
 const fullCatalog = listActivityCatalog(0);
 
-// Group the user's activities by unit, keeping the catalog's unit order.
+// Group the user's activities by unit, keeping the catalog's unit order. Uses every
+// unit: an activity from the Instruksi dialog still has to show which unit it lives in.
 const assignedActivities = selectedId ? listAssignedActivitiesForUser(selectedId) : [];
-const byUnit = categories
+const byUnit = allCategories
   .map((category) => ({
     category,
     activities: assignedActivities.filter((activity) => activity.category_id === category.id),
@@ -60,11 +64,19 @@ const byUnit = categories
   .filter((group) => group.activities.length > 0);
 
 const totalActivities = byUnit.reduce((sum, group) => sum + group.activities.length, 0);
+// Picker (single + bulk) covers the normal units only — the system unit is written by
+// the Instruksi dialog, never picked here.
 const unitsWithActivities = categories.filter((category) =>
   catalog.some((activity) => activity.category_id === category.id),
 );
+const bulkUnits = categories.filter((category) =>
+  fullCatalog.some((activity) => activity.category_id === category.id),
+);
 // Nothing left to hand out: every activity already belongs to this user.
-const canAssign = catalog.some((activity) => !activity.assigned);
+const canAssign = catalog.some((activity) => {
+  const unit = categories.find((category) => category.id === activity.category_id);
+  return unit && !activity.assigned;
+});
 
 // Posisi/Jabatan tampil sebagai badge di daftar pengguna. Yang kosong tetap diberi
 // penanda supaya barisnya tidak terlihat "bolong" — bukan cuma hilang begitu saja.
@@ -85,8 +97,8 @@ const noJabatanBadge =
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <Button type="button" variant="outline" data-direct-open disabled={members.length === 0}>
-        <Zap class="size-4" />
-        Penugasan Langsung
+        <Bolt class="size-4" />
+        Instruksi
       </Button>
       <Button type="button" variant="outline" data-bulk-open disabled={members.length === 0}>
         <Users class="size-4" />
@@ -106,7 +118,7 @@ const noJabatanBadge =
         <p class="mt-0.5 text-xs text-slate-500">Pilih pengguna untuk mengelola penugasannya.</p>
 
         <div class="relative mt-3">
-          <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <MagnifyingGlass class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <label for="user-search" class="sr-only">Cari pengguna</label>
           <input
             id="user-search"
@@ -125,7 +137,7 @@ const noJabatanBadge =
             hidden
             class="absolute right-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
           >
-            <X class="size-3.5" />
+            <XMark class="size-3.5" />
           </button>
           <kbd
             data-user-search-hint
@@ -161,7 +173,7 @@ const noJabatanBadge =
                       active ? "bg-brand-600 text-onbrand" : "bg-slate-100 text-slate-500",
                     ]}
                   >
-                    <UserRound class="size-4" />
+                    <User class="size-4" />
                   </span>
                   <span class="min-w-0 flex-1">
                     <span
@@ -200,13 +212,13 @@ const noJabatanBadge =
         {
           members.length === 0 ? (
             <li class="px-4 py-8 text-center">
-              <UserRound class="mx-auto size-6 text-slate-300" />
+              <User class="mx-auto size-6 text-slate-300" />
               <p class="mt-2 text-sm font-medium text-slate-900">Belum ada pengguna</p>
               <p class="mt-1 text-xs text-slate-500">Tambahkan pengguna dulu lewat menu Pengguna.</p>
             </li>
           ) : (
             <li data-user-empty hidden class="px-4 py-8 text-center">
-              <UserRound class="mx-auto size-6 text-slate-300" />
+              <User class="mx-auto size-6 text-slate-300" />
               <p class="mt-2 text-sm font-medium text-slate-900">Pengguna tidak ditemukan</p>
               <p class="mt-1 text-xs text-slate-500">Coba nama atau email lain.</p>
               <button
@@ -227,7 +239,7 @@ const noJabatanBadge =
       {
         !selected ? (
           <div class="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
-            <UserRound class="mx-auto size-8 text-slate-300" />
+            <User class="mx-auto size-8 text-slate-300" />
             <p class="mt-2 text-sm font-medium text-slate-900">Belum ada pengguna level 1 atau 2</p>
             <p class="mt-1 text-sm text-slate-500">Tambahkan pengguna dulu lewat menu Pengguna.</p>
           </div>
@@ -274,7 +286,7 @@ const noJabatanBadge =
               </div>
             </header>
 
-            {!canAssign && catalog.length > 0 && (
+            {!canAssign && unitsWithActivities.length > 0 && (
               <p class="border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-xs text-slate-500">
                 Semua jenis aktivitas sudah ditugaskan ke pengguna ini. Lepas salah satu untuk
                 menugaskannya ulang.
@@ -283,8 +295,8 @@ const noJabatanBadge =
 
             {byUnit.length === 0 ? (
               <div class="px-5 py-12 text-center">
-                <ClipboardX class="mx-auto size-8 text-slate-300" />
-                {catalog.length === 0 ? (
+                <ClipboardDocument class="mx-auto size-8 text-slate-300" />
+                {unitsWithActivities.length === 0 ? (
                   <>
                     <p class="mt-2 text-sm font-medium text-slate-900">Belum ada jenis aktivitas</p>
                     <p class="mx-auto mt-1 max-w-sm text-sm text-slate-500">
@@ -330,7 +342,7 @@ const noJabatanBadge =
                             aria-label={`Lepas ${activity.name}`}
                             class="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
                           >
-                            <X class="size-3.5" />
+                            <XMark class="size-3.5" />
                             Lepas
                           </button>
                         </li>
@@ -363,7 +375,7 @@ const noJabatanBadge =
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -431,7 +443,7 @@ const noJabatanBadge =
         <div class="flex flex-col-reverse gap-2 sm:flex-row">
           <Button variant="outline" type="button" data-dialog-close>Batal</Button>
           <Button type="submit" disabled={!canAssign}>
-            <ClipboardCheck class="size-4" />
+            <ClipboardDocumentCheck class="size-4" />
             Simpan
           </Button>
         </div>
@@ -456,7 +468,7 @@ const noJabatanBadge =
           aria-label="Tutup"
           class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
         >
-          <X class="size-4" />
+          <XMark class="size-4" />
         </button>
       </div>
 
@@ -470,7 +482,7 @@ const noJabatanBadge =
             <button
               type="button"
               data-bulk-activity-all
-              disabled={unitsWithActivities.length === 0}
+              disabled={bulkUnits.length === 0}
               class="text-xs font-medium text-brand-600 transition-colors hover:text-brand-700 disabled:text-slate-400 focus-visible:outline-2 focus-visible:outline-brand-600"
             >
               Centang semua unit ini
@@ -478,7 +490,7 @@ const noJabatanBadge =
           </div>
 
           {
-            unitsWithActivities.length === 0 ? (
+            bulkUnits.length === 0 ? (
               <p class="mt-2 rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-slate-500">
                 Belum ada jenis aktivitas. Tambahkan dulu lewat menu Kategori.
               </p>
@@ -489,7 +501,7 @@ const noJabatanBadge =
                   data-bulk-unit
                   class="mt-2 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
                 >
-                  {unitsWithActivities.map((category, index) => (
+                  {bulkUnits.map((category, index) => (
                     <option value={category.id} selected={index === 0}>
                       {category.label}
                     </option>
@@ -497,7 +509,7 @@ const noJabatanBadge =
                 </select>
 
                 <div class="mt-2">
-                  {unitsWithActivities.map((category, index) => (
+                  {bulkUnits.map((category, index) => (
                     <fieldset data-bulk-panel={category.id} hidden={index > 0}>
                       <legend class="sr-only">{category.label}</legend>
                       <div class="grid gap-1.5 sm:grid-cols-2">
@@ -546,7 +558,7 @@ const noJabatanBadge =
           </div>
 
           <div class="relative mt-2">
-            <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+            <MagnifyingGlass class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
             <label for="bulk-user-search" class="sr-only">Cari pengguna</label>
             <input
               id="bulk-user-search"
@@ -615,7 +627,7 @@ const noJabatanBadge =
         <div class="flex flex-col-reverse gap-2 sm:flex-row">
           <Button variant="outline" type="button" data-dialog-close>Batal</Button>
           <Button type="submit" disabled={members.length === 0}>
-            <ClipboardCheck class="size-4" />
+            <ClipboardDocumentCheck class="size-4" />
             Simpan
           </Button>
         </div>
@@ -629,7 +641,7 @@ const noJabatanBadge =
       <div class="p-5 sm:p-6">
         <div class="flex items-start gap-3">
           <span class="grid size-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">
-            <TriangleAlert class="size-5" />
+            <ExclamationTriangle class="size-5" />
           </span>
           <div class="min-w-0 flex-1">
             <h2 id="clear-title" class="text-base font-semibold text-slate-900">Hapus semua penugasan?</h2>

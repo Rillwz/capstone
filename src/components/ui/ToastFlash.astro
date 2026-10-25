@@ -1,0 +1,29 @@
+---
+// A redirect flag (?saved=1) rendered as an invisible marker: src/scripts/toast.ts
+// turns it into a toast on page load and drops the parameter. Without JavaScript the
+// <noscript> copy is what the visitor sees.
+import type { ToastTone } from "../../scripts/toast";
+
+interface Props {
+  tone?: ToastTone;
+  message: string;
+  /** URL parameters this flash owns, dropped once it is shown. */
+  params?: string;
+}
+
+const { tone = "success", message, params } = Astro.props;
+
+const BANNER: Record<ToastTone, string> = {
+  success: "bg-emerald-50 text-emerald-700",
+  error: "bg-red-50 text-red-700",
+  warning: "bg-amber-50 text-amber-700",
+  info: "bg-slate-100 text-slate-700",
+};
+---
+
+<div data-toast-flash data-tone={tone} data-params={params} class="hidden">{message}</div>
+<noscript>
+  <p class:list={["mt-6 rounded-lg px-3 py-2 text-sm", BANNER[tone]]} role={tone === "error" ? "alert" : "status"}>
+    {message}
+  </p>
+</noscript>

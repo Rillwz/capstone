@@ -1,0 +1,160 @@
+---
+// Permintaan reset kata sandi — sisi admin. Pengguna mengajukan lewat /lupa-sandi;
+// admin yang mengeksekusi, karena aplikasi ini tidak mengirim email. Reset menimpa
+// sandi dengan DEFAULT_USER_PASSWORD yang sama seperti saat membuat akun baru.
+import { ArrowPath, CheckCircle, Clock, Key, XMark } from "../../lib/icons";
+import Button from "../../components/ui/Button.astro";
+import PasswordReveal from "../../components/admin/PasswordReveal.astro";
+import ToastFlash from "../../components/ui/ToastFlash.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import bcrypt from "bcryptjs";
+import { requireAdmin } from "../../lib/auth";
+import { handlePasswordReset, listPasswordResets } from "../../lib/db";
+import { DEFAULT_USER_PASSWORD } from "../../lib/defaults";
+import { formatDateTime } from "../../lib/format";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const adminId = Number(session.user!.id);
+if (!Number.isInteger(adminId)) return Astro.redirect("/login?error=SessionRequired");
+
+// Tanpa JavaScript: form biasa ke halaman ini sendiri, lalu redirect dengan penanda.
+const RESULT_PARAMS: Record<string, string> = {
+  reset: "Kata sandi sudah diatur ulang ke kata sandi default.",
+  rejected: "Permintaan ditolak.",
+  gone: "Permintaan itu sudah ditangani sebelumnya.",
+};
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = form.get("action") === "reset" ? "reset" : "rejected";
+  const id = Number(form.get("id") ?? 0);
+  const hash = action === "reset" ? await bcrypt.hash(DEFAULT_USER_PASSWORD, 10) : undefined;
+  const done = handlePasswordReset(id, adminId, action, hash);
+  return Astro.redirect(`/dashboard/permintaan-reset?hasil=${done ? action : "gone"}`);
+}
+
+const rows = listPasswordResets();
+const pending = rows.filter((row) => row.status === "pending");
+const handled = rows.filter((row) => row.status !== "pending");
+const result = Astro.url.searchParams.get("hasil");
+const notice = result ? RESULT_PARAMS[result] : undefined;
+---
+
+<DashboardLayout title="Reset" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Permintaan reset kata sandi</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Diajukan dari halaman masuk. Atur ulang sandi, lalu sampaikan kata sandi default ke
+        pemiliknya.
+      </p>
+    </div>
+    {pending.length > 0 && (
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-700">
+        <Clock class="size-4" />
+        {pending.length} menunggu
+      </span>
+    )}
+  </div>
+
+  {
+    notice && (
+      <ToastFlash
+        tone={result === "reset" ? "success" : result === "gone" ? "warning" : "info"}
+        message={notice}
+        params="hasil"
+      />
+    )
+  }
+
+  <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+    <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+      <h2 class="text-sm font-semibold text-slate-900">Menunggu tindakan</h2>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+        {pending.length}
+      </span>
+    </header>
+
+    {
+      pending.length === 0 ? (
+        <div class="flex flex-col items-center gap-2 px-6 py-14 text-center">
+          <Key class="size-8 text-slate-300" />
+          <p class="text-sm font-medium text-slate-900">Tidak ada permintaan</p>
+          <p class="max-w-sm text-sm text-slate-500">
+            Permintaan baru muncul di sini saat pengguna membuka "Lupa kata sandi?" di halaman masuk.
+          </p>
+        </div>
+      ) : (
+        <ul class="divide-y divide-slate-100">
+          {pending.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4" data-reveal="fade">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-900">{row.name}</p>
+                <p class="truncate text-xs text-slate-500" title={row.email}>
+                  {row.email}
+                  {row.jabatan && ` · ${row.jabatan}`}
+                </p>
+                <p class="mt-0.5 text-xs text-slate-400">Diajukan {formatDateTime(row.created_at)}</p>
+              </div>
+
+              <form method="POST" class="flex shrink-0 items-center gap-2">
+                <input type="hidden" name="id" value={row.id} />
+                <Button variant="outline" size="sm" type="submit" name="action" value="rejected">
+                  <XMark class="size-4" />
+                  Tolak
+                </Button>
+                <Button size="sm" type="submit" name="action" value="reset">
+                  <ArrowPath class="size-4" />
+                  Reset kata sandi
+                </Button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+
+  <p class="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+    <Key class="size-3.5 shrink-0 text-slate-400" />
+    Setelah direset, kata sandi menjadi
+    <PasswordReveal value={DEFAULT_USER_PASSWORD} />
+    — sama seperti akun baru. Minta pemiliknya menggantinya lewat halaman Profil.
+  </p>
+
+  {
+    handled.length > 0 && (
+      <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+        <header class="border-b border-slate-200 px-5 py-4">
+          <h2 class="text-sm font-semibold text-slate-900">Sudah ditangani</h2>
+        </header>
+        <ul class="divide-y divide-slate-100">
+          {handled.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5" data-reveal="fade">
+              <CheckCircle
+                class:list={[
+                  "size-4 shrink-0",
+                  row.status === "reset" ? "text-emerald-500" : "text-slate-300",
+                ]}
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium text-slate-900">{row.name}</span>
+                <span class="block truncate text-xs text-slate-500">{row.email}</span>
+              </span>
+              <span class="text-right text-xs text-slate-500">
+                <span class="block font-medium text-slate-700">
+                  {row.status === "reset" ? "Kata sandi direset" : "Ditolak"}
+                </span>
+                <span class="block">
+                  {row.handled_by_name ?? "Admin"} · {row.handled_at ? formatDateTime(row.handled_at) : "–"}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</DashboardLayout>

@@ -26,13 +26,17 @@ export function formatDateOnly(value: string): string {
   });
 }
 
-/** Activity rows show the day only ("13"); a row saved without a date shows a dash. */
-export function formatDay(value: string): string {
-  return value ? String(Number(value.slice(8, 10))) : "–";
+/** Rentang berlaku satu aktivitas: "5 Okt 2026 – 20 Des 2026"; ujung kosong = terbuka. */
+export function formatRange(start: string, end: string): string {
+  if (start && end) return `${formatDate(start)} – ${formatDate(end)}`;
+  if (start) return `sejak ${formatDate(start)}`;
+  if (end) return `s.d. ${formatDate(end)}`;
+  return "–";
 }
 
-/** A plain civil date ("YYYY-MM-DD") as "20 Okt 2026". */
+/** A plain civil date ("YYYY-MM-DD") as "20 Okt 2026"; empty means "not set". */
 export function formatDate(value: string): string {
+  if (!value) return "–";
   return new Date(`${value}T00:00:00Z`).toLocaleDateString("id-ID", {
     day: "numeric",
     month: "short",

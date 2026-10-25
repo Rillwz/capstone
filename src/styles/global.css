@@ -290,9 +290,9 @@ html:not([data-theme]) [data-theme-icon="light"] {
   padding: 0;
 }
 
-/* Countdown bar on the pending-delete notice (users.astro). The JS timer is what
-   decides; this is only the visual, so reduced motion just freezes it. */
-@keyframes pending-countdown {
+/* Countdown bar on a toast with an action (the 5 second delete undo). Set per toast
+   by src/scripts/toast.ts, so the animation duration always matches its timer. */
+@keyframes toast-countdown {
   from {
     transform: scaleX(1);
   }
@@ -301,44 +301,14 @@ html:not([data-theme]) [data-theme-icon="light"] {
   }
 }
 
-.pending-countdown {
+.toast-countdown {
   transform-origin: left;
-  animation: pending-countdown 15s linear forwards;
+  animation: toast-countdown linear forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pending-countdown {
+  .toast-countdown {
     animation: none;
-  }
-}
-
-/* Flash notice ("Aktivitas tersimpan.") that leaves on its own: the page's JS adds
-   .is-leaving after a few seconds, then removes the node. The space collapses in the
-   same transition so the table below does not jump. Reduced motion just skips ahead. */
-.notice {
-  overflow: hidden;
-  max-height: 8rem;
-  transition:
-    opacity 0.35s ease,
-    transform 0.35s ease,
-    filter 0.35s ease,
-    max-height 0.35s ease,
-    margin-top 0.35s ease,
-    padding-block 0.35s ease;
-}
-
-.notice.is-leaving {
-  opacity: 0;
-  transform: translateY(-6px);
-  filter: blur(4px);
-  max-height: 0;
-  margin-top: 0;
-  padding-block: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .notice {
-    transition: none;
   }
 }
 

@@ -24,8 +24,10 @@ export type Periode = (typeof PERIODES)[number];
 
 export interface ActivityInput {
   name: string;
-  /** ISO "YYYY-MM-DD", or "" when the row has no date (day input 0). */
-  date: string;
+  /** ISO "YYYY-MM-DD" mulai berlaku, atau "" bila tidak dibatasi. */
+  start_date: string;
+  /** ISO "YYYY-MM-DD" batas akhir; "" berarti berulang tanpa batas. */
+  end_date: string;
   utama: boolean;
   periodik: boolean;
   bukan_tupoksi: boolean;
@@ -54,8 +56,9 @@ const inList = <T extends string>(options: readonly T[], value: string): value i
 /** The values one activity row is made of, as typed by the user. */
 export interface ActivityValues {
   name: string;
-  /** The day of the month (0 = the row carries no date). */
-  day: number;
+  /** Rentang berlaku, ISO "YYYY-MM-DD"; "" = terbuka di ujung itu. */
+  start_date: string;
+  end_date: string;
   utama: boolean;
   periodik: boolean;
   bukan_tupoksi: boolean;
@@ -65,13 +68,12 @@ export interface ActivityValues {
   sdm: number;
 }
 
-/** Validate one activity row: the message to show, or the parsed values.
- *  `month` is which YYYY-MM the day belongs to; editing an old row passes its own. */
+/** Validate one activity row: the message to show, or the parsed values. */
 export function parseActivityValues(
   values: ActivityValues,
-  month = todayInJakarta().slice(0, 7),
 ): { error: string } | { value: ActivityInput } {
-  const { name, day, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm } = values;
+  const { name, start_date, end_date, utama, periodik, bukan_tupoksi, periode, frequency, minutes, sdm } =
+    values;
 
   // One checkbox per classification, so the flags are independent.
   const flags: Record<Classification, boolean> = {
@@ -82,11 +84,14 @@ export function parseActivityValues(
 
   if (name.trim().length < 3) return { error: "Jenis aktivitas minimal 3 karakter." };
   if (name.trim().length > 500) return { error: "Jenis aktivitas maksimal 500 karakter." };
-  if (!isIntegerIn(day, 0, 31)) return { error: "Tanggal harus angka hari 0–31." };
 
-  // Only the day is typed; 0 (or empty) = no date.
-  const date = day === 0 ? "" : `${month}-${String(day).padStart(2, "0")}`;
-  if (date && !isIsoDate(date)) return { error: `Tanggal ${day} tidak ada di bulan ini.` };
+  // Rentang berlaku: mulai & tenggat. Kosong berarti terbuka; tenggat boleh
+  // dikosongkan (berulang tanpa batas) tapi tidak boleh mendahului tanggal mulai.
+  if (start_date && !isIsoDate(start_date)) return { error: "Tanggal mulai tidak valid." };
+  if (end_date && !isIsoDate(end_date)) return { error: "Tenggat tidak valid." };
+  if (start_date && end_date && end_date < start_date) {
+    return { error: "Tenggat tidak boleh sebelum tanggal mulai." };
+  }
 
   // The three classifications are independent — a row may carry none of them.
   if (!inList(PERIODES, periode)) return { error: "Periode tidak valid." };
@@ -97,26 +102,33 @@ export function parseActivityValues(
   // Volume kerja is not typed in: it is the yearly workload of the activity.
   const volume = frequency * minutes * sdm;
 
-  return { value: { name: name.trim(), date, ...flags, periode, frequency, minutes, sdm, volume } };
+  return {
+    value: {
+      name: name.trim(),
+      start_date,
+      end_date,
+      ...flags,
+      periode,
+      frequency,
+      minutes,
+      sdm,
+      volume,
+    },
+  };
 }
 
 /** The same validation, straight from a submitted form. */
-export function parseActivity(
-  form: FormData,
-  month = todayInJakarta().slice(0, 7),
-): { error: string } | { value: ActivityInput } {
-  return parseActivityValues(
-    {
-      name: String(form.get("name") ?? ""),
-      day: Number(form.get("day") || 0),
-      utama: form.has("utama"),
-      periodik: form.has("periodik"),
-      bukan_tupoksi: form.has("bukan_tupoksi"),
-      periode: String(form.get("periode") ?? ""),
-      frequency: Number(form.get("frequency")),
-      minutes: Number(form.get("minutes")),
-      sdm: Number(form.get("sdm")),
-    },
-    month,
-  );
+export function parseActivity(form: FormData): { error: string } | { value: ActivityInput } {
+  return parseActivityValues({
+    name: String(form.get("name") ?? ""),
+    start_date: String(form.get("start_date") ?? ""),
+    end_date: String(form.get("end_date") ?? ""),
+    utama: form.has("utama"),
+    periodik: form.has("periodik"),
+    bukan_tupoksi: form.has("bukan_tupoksi"),
+    periode: String(form.get("periode") ?? ""),
+    frequency: Number(form.get("frequency")),
+    minutes: Number(form.get("minutes")),
+    sdm: Number(form.get("sdm")),
+  });
 }

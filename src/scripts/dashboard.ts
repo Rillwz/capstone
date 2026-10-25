@@ -3,23 +3,8 @@
 // position stays where the admin left it.
 import { navigate } from "astro:transitions/client";
 
-/** Umpan balik singkat di atas halaman — pengganti banner dari parameter URL. */
-export function toast(message: string, tone: "success" | "error" = "success") {
-  const host = document.querySelector("main") ?? document.body;
-  const notice = document.createElement("p");
-  notice.className = [
-    "notice mt-6 rounded-lg px-3 py-2 text-sm",
-    tone === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700",
-  ].join(" ");
-  notice.setAttribute("role", "status");
-  notice.textContent = message;
-  host.prepend(notice);
-
-  setTimeout(() => {
-    notice.classList.add("is-leaving");
-    setTimeout(() => notice.remove(), 400);
-  }, 4000);
-}
+/** Umpan balik singkat — lihat src/scripts/toast.ts untuk tone dan ikonnya. */
+export { toast } from "./toast.ts";
 
 /**
  * Render ulang halaman lewat router: data baru, tanpa muat ulang penuh.
