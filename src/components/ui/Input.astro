@@ -7,6 +7,8 @@ import { Eye, EyeOff } from "@lucide/astro";
 interface Props {
   label: string;
   name: string;
+  /** Menimpa id bawaan `field-<name>` — dipakai bila satu halaman punya dua field bernama sama. */
+  id?: string;
   type?: "text" | "email" | "password" | "number" | "tel" | "url" | "date";
   placeholder?: string;
   value?: string;
@@ -18,9 +20,20 @@ interface Props {
   class?: string;
 }
 
-const { label, name, type = "text", placeholder, value, required, disabled, error, inputmode, class: className } =
-  Astro.props;
-const id = `field-${name}`;
+const {
+  label,
+  name,
+  id: idProp,
+  type = "text",
+  placeholder,
+  value,
+  required,
+  disabled,
+  error,
+  inputmode,
+  class: className,
+} = Astro.props;
+const id = idProp ?? `field-${name}`;
 const isPassword = type === "password";
 ---
 

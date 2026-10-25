@@ -1,0 +1,32 @@
+C4Component
+  title Component diagram for Ondine - Image Worker
+
+  Container_Boundary(worker, "Image Worker") {
+    Component(router, "Request Router", "TypeScript", "Matches payload and source paths, answers HEAD, refuses other methods with 405, and unknown paths with 404.")
+    Component(decoder, "Payload Decoder", "TypeScript, zlib, base64url", "Inflates the zlib-deflated, base64url payload, or reads the source query parameter. Enforces the 4,096-character path limit and the 64 KiB source limit.")
+    Component(renderer, "Compiler Binding", "TypeScript, WebAssembly", "Renders the source with the size-optimized module for every diagram type, precompiled into the Worker so a request downloads nothing.")
+    Component(scheme, "Scheme Resolver", "TypeScript, CSS", "Writes the light, dark, or auto scheme into the SVG as --ondine-* custom properties.")
+    Component(card, "PNG Card Renderer", "TypeScript, resvg", "Draws the diagram on a 1200x630 PNG card for hosts that do not display SVG.")
+    Component(preview, "Preview Negotiator", "TypeScript", "Answers link previewers with an HTML page whose og:image is the PNG card.")
+    Component(errors, "Error Card Builder", "TypeScript", "Builds the error card returned with status 400 for an invalid, missing, or oversized payload.")
+    Component(policy, "Response Policy", "HTTP", "Sets cache-control, content-security-policy, content-type, x-content-type-options, and vary.")
+  }
+
+  System_Ext(host, "Markdown Host", "GitHub and similar hosts that render README images.")
+  System_Ext(browser, "Browser", "Shows a diagram, or a link preview of one.")
+
+  Rel(host, router, "Requests images from", "HTTPS")
+  Rel(browser, router, "Requests images from", "HTTPS")
+  Rel(router, decoder, "Hands the payload to")
+  Rel(router, preview, "Hands preview requests to")
+  Rel(decoder, renderer, "Passes the source to")
+  Rel(renderer, scheme, "Hands the SVG to")
+  Rel(renderer, card, "Hands the SVG to")
+  Rel(decoder, errors, "Reports failures to")
+  Rel(renderer, errors, "Reports failures to")
+  Rel(card, policy, "Returns through")
+  Rel(scheme, policy, "Returns through")
+  Rel(errors, policy, "Returns through")
+  Rel(preview, card, "Names the card of")
+  Rel(policy, host, "Answers", "image/svg+xml, image/png")
+  Rel(policy, browser, "Answers", "image/svg+xml, image/png")

@@ -1,0 +1,18 @@
+C4Dynamic
+  title Dynamic diagram for Ondine - Compile a diagram at build time
+
+  Person(author, "Diagram Author", "Writes the Mermaid source and the page that shows it.")
+  Container(vite, "Vite Plugin", "TypeScript, Vite", "Compiles imported .mmd and .mermaid files.")
+  Container(compiler, "Compiler Core", "Rust, WebAssembly", "Parses, lays out, and renders the diagram.")
+  Container(page, "Page", "HTML, CSS", "Ships the compiled SVG and the mount runtime.")
+  Container(mount, "Mount Runtime", "TypeScript, 210 bytes gzip", "Inserts the precompiled SVG into the element.")
+  System_Ext(browser, "Browser", "Shows the page.")
+
+  Rel(author, vite, "Imports a diagram file into", "build")
+  Rel(vite, compiler, "Asks to render", "WebAssembly")
+  Rel(compiler, vite, "Returns the SVG", "inline SVG")
+  Rel(vite, page, "Emits the SVG into")
+  Rel(author, browser, "Opens the page in")
+  Rel(browser, page, "Loads")
+  Rel(browser, mount, "Calls")
+  Rel(mount, page, "Inserts the SVG into")

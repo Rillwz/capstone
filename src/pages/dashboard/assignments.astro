@@ -10,7 +10,7 @@ import { ClipboardCheck, ClipboardX, Plus, Search, Trash, TriangleAlert, UserRou
 import Button from "../../components/ui/Button.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
-import { categories } from "../../lib/categories";
+import { listCategories } from "../../lib/categories";
 import {
   listActivityCatalog,
   listAssignedActivitiesForUser,
@@ -22,6 +22,7 @@ const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
 
 const members = listUsers().filter((user) => user.role !== 0);
+const categories = listCategories();
 const counts = new Map(listAssignmentUsers().map((row) => [row.id, row]));
 
 let selectedId = Number(Astro.url.searchParams.get("user")) || 0;

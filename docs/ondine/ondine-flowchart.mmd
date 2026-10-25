@@ -1,0 +1,66 @@
+flowchart LR
+  subgraph input[Input]
+    files[".mmd / .mermaid files"]
+    fences["mermaid fence in .md / .mdx"]
+    url["URL request<br/>/svg?source= or /<payload>.svg"]
+    live["Text known at runtime<br/>editor, preview"]
+  end
+
+  subgraph entry[Entry points]
+    vite["ondine/vite<br/>build plugin"]
+    remark["ondine/remark<br/>MDX plugin"]
+    cli["ondine CLI"]
+    nodeapi["ondine/compiler<br/>render()"]
+    worker["Image Worker<br/>Cloudflare"]
+    wasm["ondine/compiler/wasm<br/>browser, edge"]
+  end
+
+  subgraph core["Ondine compiler (Rust)"]
+    api["Compiler API"]
+    parse["Parser<br/>Mermaid 12.1.0 syntax"]
+    model["Diagram model"]
+    layout["Layout engine"]
+    render["SVG renderer"]
+  end
+
+  subgraph errors[Errors]
+    err["RenderError<br/>line, column, snippet"]
+    fail["Build fails<br/>file:line:column"]
+    card["400 error card"]
+  end
+
+  subgraph output[Output]
+    svg["SVG markup<br/>inert, no scripts"]
+    png["PNG card 1200x630"]
+  end
+
+  subgraph runtime[Browser runtime]
+    mount["mount()<br/>210 bytes gzip"]
+    dom["DOM element"]
+    theme["--ondine-* CSS properties"]
+  end
+
+  files --> vite
+  files --> cli
+  fences --> remark
+  url --> worker
+  live --> wasm
+
+  vite --> api
+  remark --> api
+  cli --> api
+  nodeapi --> api
+  worker --> api
+  wasm --> api
+
+  api --> parse --> model --> layout --> render
+
+  render --> svg
+  worker --> png
+
+  svg --> mount --> dom
+  theme -.-> dom
+
+  parse -.-> err
+  err --> fail
+  err --> card

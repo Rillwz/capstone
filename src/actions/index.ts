@@ -10,19 +10,29 @@ import {
   completeOccurrence,
   createActivity,
   createAssignments,
+  createCategory,
   createPost,
+  createPosition,
   createUser,
+  dailyActivityByYear,
   deleteActivity,
   deleteAssignment,
   deleteAssignmentActivity,
+  deleteCategory,
   deletePost,
+  deletePosition,
   deleteUser,
+  materializeOverdue,
   setOccurrenceNote,
   taskStats,
   undoOccurrence,
   updateActivity,
+  updateCategory,
+  updatePosition,
   updatePost,
+  updateUserAccount,
 } from "../lib/db";
+import { ICON_PALETTE } from "../lib/categories";
 import { DEFAULT_USER_PASSWORD } from "../lib/defaults";
 import { NOTE_MAX, parseNoteValues } from "../lib/notes";
 import { PERIODES, parseActivityValues } from "../lib/activities";
@@ -53,7 +63,23 @@ async function currentAdminId(context: ActionAPIContext): Promise<number> {
 const occurrence = z.object({
   activityId: z.number().int().positive(),
   periodKey: z.string().min(1).max(40),
+  /** Tahun grafik yang sedang dilihat, biar klien bisa menyegarkan kotaknya. */
+  year: z.number().int().min(2000).max(2100).optional(),
 });
+
+/**
+ * Rekap grafik untuk tahun yang sedang dilihat.
+ *
+ * Halaman merender ulang keadaan lewat aksi, jadi angka grafik harus sama dengan
+ * yang akan muncul setelah muat ulang: periodenya yang lewat dicatat dulu.
+ */
+function graphState(userId: number, year?: number) {
+  materializeOverdue(userId);
+  return {
+    stats: taskStats(userId),
+    graph: year === undefined ? undefined : dailyActivityByYear(userId, year),
+  };
+}
 
 export const server = {
   /** Tandai satu kemunculan selesai. */
@@ -65,7 +91,7 @@ export const server = {
       if (result === "invalid") {
         throw new ActionError({ code: "NOT_FOUND", message: "Kemunculan tugas ini tidak ada." });
       }
-      return { result, stats: taskStats(userId) };
+      return { result, ...graphState(userId, input.year) };
     },
   }),
 
@@ -78,7 +104,7 @@ export const server = {
       if (!result) {
         throw new ActionError({ code: "NOT_FOUND", message: "Tanda selesai ini tidak ada." });
       }
-      return { result, stats: taskStats(userId) };
+      return { result, ...graphState(userId, input.year) };
     },
   }),
 
@@ -155,6 +181,7 @@ export const server = {
       name: z.string().min(2).max(160),
       email: z.email().max(200),
       role: z.number().int().min(1).max(2),
+      jabatan: z.string().max(160).optional(),
     }),
     handler: async (input, context) => {
       await currentAdminId(context);
@@ -168,9 +195,43 @@ export const server = {
           email,
           await bcrypt.hash(DEFAULT_USER_PASSWORD, 10),
           input.role === 2 ? 2 : 1,
+          input.jabatan ?? "",
         );
       } catch {
         throw new ActionError({ code: "CONFLICT", message: "Email sudah terdaftar." });
+      }
+      return {};
+    },
+  }),
+
+  /** Ubah data satu akun: nama, email, jabatan, level. Kata sandi tidak disentuh. */
+  updateUserAccount: defineAction({
+    input: z.object({
+      id: z.number().int().positive(),
+      name: z.string().min(2).max(160),
+      email: z.email().max(200),
+      jabatan: z.string().max(160).optional(),
+      role: z.number().int().min(0).max(2),
+    }),
+    handler: async (input, context) => {
+      const adminId = await currentAdminId(context);
+      // Mengubah level akun sendiri bisa mengunci admin keluar dari halaman ini.
+      if (input.id === adminId && input.role !== 0) {
+        throw new ActionError({ code: "FORBIDDEN", message: "Level akun sendiri tidak bisa diturunkan." });
+      }
+      const email = input.email.toLowerCase();
+      try {
+        const updated = updateUserAccount(
+          input.id,
+          input.name.trim(),
+          email,
+          input.jabatan ?? "",
+          input.role === 0 ? 0 : input.role === 2 ? 2 : 1,
+        );
+        if (!updated) throw new ActionError({ code: "NOT_FOUND", message: "Pengguna tidak ditemukan." });
+      } catch (error) {
+        if (error instanceof ActionError) throw error;
+        throw new ActionError({ code: "CONFLICT", message: "Email sudah dipakai akun lain." });
       }
       return {};
     },
@@ -185,6 +246,51 @@ export const server = {
         throw new ActionError({ code: "FORBIDDEN", message: "Akun sendiri tidak bisa dihapus." });
       }
       deleteUser(input.id);
+      return {};
+    },
+  }),
+
+  // -------------------------------------------------------------------------
+  // Admin: posisi/jabatan
+  // -------------------------------------------------------------------------
+
+  /** Tambah satu Posisi/Jabatan (pilihan dropdown di form pengguna). */
+  createPosition: defineAction({
+    input: z.object({ label: z.string().min(2).max(160) }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      try {
+        createPosition(input.label);
+      } catch {
+        throw new ActionError({ code: "CONFLICT", message: "Jabatan itu sudah ada." });
+      }
+      return {};
+    },
+  }),
+
+  /** Ubah nama satu jabatan; akun yang memakainya ikut diperbarui. */
+  updatePosition: defineAction({
+    input: z.object({ id: z.number().int().positive(), label: z.string().min(2).max(160) }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      try {
+        if (!updatePosition(input.id, input.label)) {
+          throw new ActionError({ code: "NOT_FOUND", message: "Jabatan tidak ditemukan." });
+        }
+      } catch (error) {
+        if (error instanceof ActionError) throw error;
+        throw new ActionError({ code: "CONFLICT", message: "Jabatan itu sudah ada." });
+      }
+      return {};
+    },
+  }),
+
+  /** Hapus satu jabatan. Akun yang sudah memakainya tetap menyimpan teksnya. */
+  deletePosition: defineAction({
+    input: z.object({ id: z.number().int().positive() }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      deletePosition(input.id);
       return {};
     },
   }),
@@ -247,6 +353,51 @@ export const server = {
       await currentAdminId(context);
       for (const id of input.ids) deleteActivity(id, input.categoryId);
       return { deleted: input.ids.length };
+    },
+  }),
+
+  // -------------------------------------------------------------------------
+  // Admin: kategori (unit kerja)
+  // -------------------------------------------------------------------------
+
+  /** Buat satu kategori baru; jawabannya slug id-nya. */
+  createCategory: defineAction({
+    input: z.object({
+      label: z.string().trim().min(2).max(80),
+      icon: z.string().max(40),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const icon = input.icon in ICON_PALETTE ? input.icon : "tags";
+      const id = createCategory(input.label, icon);
+      if (!id) throw new ActionError({ code: "BAD_REQUEST", message: "Kategori gagal dibuat." });
+      return { id };
+    },
+  }),
+
+  /** Ubah nama & ikon satu kategori. */
+  updateCategory: defineAction({
+    input: z.object({
+      id: z.string().min(1).max(60),
+      label: z.string().trim().min(2).max(80),
+      icon: z.string().max(40),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const icon = input.icon in ICON_PALETTE ? input.icon : "tags";
+      const updated = updateCategory(input.id, input.label, icon);
+      if (!updated) throw new ActionError({ code: "NOT_FOUND", message: "Kategori tidak ditemukan." });
+      return {};
+    },
+  }),
+
+  /** Hapus satu kategori beserta seluruh aktivitas dan penugasannya. */
+  deleteCategory: defineAction({
+    input: z.object({ id: z.string().min(1).max(60) }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      deleteCategory(input.id);
+      return {};
     },
   }),
 

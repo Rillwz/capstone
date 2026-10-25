@@ -280,7 +280,13 @@ const dueText = (due: string) => {
 
 <script>
   import { actions } from "astro:actions";
-  import { applyStats, refreshGroupCounts, setTaskState } from "../scripts/tasks.ts";
+  import {
+    applyStats,
+    graphYear,
+    patchGraph,
+    refreshGroupCounts,
+    setTaskState,
+  } from "../scripts/tasks.ts";
 
   // Aksinya lewat Astro Action, jadi halamannya tidak pernah dimuat ulang: server
   // menjawab dengan keadaan baru, lalu DOM-nya diselaraskan di tempat.
@@ -322,8 +328,12 @@ const dueText = (due: string) => {
       const name = card?.dataset.name ?? "";
 
       const { data, error } = done
-        ? await actions.undoTask({ activityId: Number(activityId), periodKey })
-        : await actions.completeTask({ activityId: Number(activityId), periodKey });
+        ? await actions.undoTask({ activityId: Number(activityId), periodKey, year: graphYear() })
+        : await actions.completeTask({
+            activityId: Number(activityId),
+            periodKey,
+            year: graphYear(),
+          });
 
       if (error || !data) {
         showError(error?.message ?? "Tugas gagal diperbarui.");
@@ -332,6 +342,7 @@ const dueText = (due: string) => {
       if (!card) return;
 
       applyStats(data.stats);
+      patchGraph(data.graph);
       setTaskState(
         card,
         { done: !done, late: !done && data.result === "terlambat", name },
@@ -350,6 +361,7 @@ const dueText = (due: string) => {
       const { data, error } = await actions.completeTask({
         activityId: Number(activityId),
         periodKey,
+        year: graphYear(),
       });
 
       if (error || !data) {
@@ -359,6 +371,7 @@ const dueText = (due: string) => {
 
       chip.closest("li")?.remove();
       applyStats(data.stats);
+      patchGraph(data.graph);
       refreshGroupCounts();
     }
   });

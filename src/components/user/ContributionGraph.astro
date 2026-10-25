@@ -5,7 +5,7 @@
 //
 // Year history: hersipyear, jadi user bisa membuka tahun-tahun sebelumnya.
 import { addDays, daysInMonth } from "../../lib/tasks";
-import { formatDate } from "../../lib/format";
+import { graphCellTitle } from "../../lib/format";
 
 interface Props {
   /** Tahun yang ditampilkan. */
@@ -33,6 +33,7 @@ const weeks = Math.ceil((firstWeekday + totalDays) / 7);
 const cells: Array<{
   date: string;
   level: number;
+  done: number;
   missed: number;
   future: boolean;
 } | null> = [];
@@ -48,6 +49,7 @@ for (let week = 0; week < weeks; week++) {
     cells.push({
       date,
       level: Math.min(bucket.done, LEVELS.length - 1),
+      done: bucket.done,
       missed: bucket.missed,
       future: date > today,
     });
@@ -78,25 +80,19 @@ for (const [date, bucket] of days) {
 }
 
 const yearOptions = [...new Set([year, ...years, new Date().getFullYear()])].sort((a, b) => b - a);
-
-const cellTitle = (date: string, done: number, missed: number) => {
-  const parts = [formatDate(date)];
-  if (done > 0) parts.push(`${done} selesai`);
-  if (missed > 0) parts.push(`${missed} terlewat`);
-  if (done === 0 && missed === 0) parts.push("tidak ada aktivitas");
-  return parts.join(" · ");
-};
 ---
 
 <section
   class="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
   data-reveal="up"
+  data-graph
+  data-graph-year={year}
   aria-labelledby="graph-title"
 >
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div>
       <h2 id="graph-title" class="text-sm font-semibold text-slate-900">Aktivitas {year}</h2>
-      <p class="mt-0.5 text-xs text-slate-500">
+      <p data-graph-summary class="mt-0.5 text-xs text-slate-500">
         {doneTotal} selesai · {missedTotal} terlewat · {activeDays} hari dengan aktivitas
       </p>
     </div>
@@ -153,6 +149,7 @@ const cellTitle = (date: string, done: number, missed: number) => {
           class="grid"
           style={`grid-template-rows: repeat(7, var(--cell)); grid-auto-columns: var(--cell); grid-auto-flow: column; gap: var(--gap)`}
           role="img"
+          data-graph-grid
           aria-label={`Grafik aktivitas ${year}: ${doneTotal} tugas selesai, ${missedTotal} terlewat, ${activeDays} hari dengan aktivitas`}
         >
           {
@@ -160,10 +157,11 @@ const cellTitle = (date: string, done: number, missed: number) => {
               cell ? (
                 <div
                   data-graph-cell
+                  data-date={cell.date}
                   data-level={cell.level}
                   data-missed={cell.missed > 0 ? "1" : undefined}
                   data-future={cell.future ? "1" : undefined}
-                  title={cellTitle(cell.date, cell.level, cell.missed)}
+                  title={graphCellTitle(cell.date, cell.done, cell.missed)}
                 />
               ) : (
                 <div data-graph-cell aria-hidden="true" />

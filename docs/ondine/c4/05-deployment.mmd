@@ -1,0 +1,44 @@
+C4Deployment
+  title Deployment diagram for Ondine
+
+  Deployment_Node(registry, "npm Registry", "registry.npmjs.org") {
+    Container(pkg, "ondine package", "TypeScript, Rust, WebAssembly", "The compiler core, the CLI, the Vite and Remark plugins, the compiler APIs, and the mount runtime.")
+  }
+
+  Deployment_Node(build, "Developer machine or CI runner", "Node.js, pnpm") {
+    Container(cli, "CLI", "Node.js, TypeScript", "Renders diagrams and rewrites Markdown fences into links to the image Worker.")
+    Container(vite, "Vite Plugin", "TypeScript, Vite", "Compiles .mmd and .mermaid imports while the site builds.")
+    Container(remark, "Remark Plugin", "TypeScript, unified", "Compiles Mermaid fences while the documentation builds.")
+    Container(nodeapi, "Node Compiler API", "TypeScript, WebAssembly", "Renders Mermaid source inside build scripts.")
+  }
+
+  Deployment_Node(edge, "Cloudflare edge network", "Cloudflare Workers") {
+    Deployment_Node(worker, "ondine.sh Worker", "wrangler, custom domain") {
+      Container(workerapp, "Image Worker", "TypeScript, WebAssembly", "Serves SVG and PNG diagrams; the compiler module is precompiled, so a request downloads nothing.")
+    }
+    Deployment_Node(docs, "Documentation deployment", "wrangler, custom domain") {
+      Container(docsapp, "Documentation Site", "TypeScript, TanStack Start", "Serves the documentation, the playground, and the llms.txt files.")
+    }
+  }
+
+  Deployment_Node(browser, "End-user browser", "Chrome, Firefox, Safari") {
+    Container(page, "Page", "HTML, CSS", "Holds the compiled SVG and the 210-byte mount runtime. No parser, no layout engine.")
+  }
+
+  Deployment_Node(github, "Markdown host", "GitHub") {
+    Container(readme, "README page", "HTML, Markdown", "Shows the diagram image that the Worker rendered.")
+  }
+
+  Rel(pkg, build, "Installed into", "npm")
+  Rel(build, workerapp, "Deploys the image Worker to", "wrangler")
+  Rel(build, docsapp, "Deploys the documentation site to", "wrangler")
+
+  Rel(workerapp, browser, "Serves diagram images to", "HTTPS")
+  Rel(docsapp, browser, "Serves documentation to", "HTTPS")
+  Rel(workerapp, github, "Serves diagram images to", "HTTPS")
+
+  UpdateLayoutConfig($c4ShapeInRow="3")
+  UpdateRelStyle(pkg, build, $offsetY="-40", $offsetX="40")
+  UpdateRelStyle(build, workerapp, $offsetX="-70", $offsetY="-20")
+  UpdateRelStyle(build, docsapp, $offsetX="60", $offsetY="20")
+  UpdateRelStyle(workerapp, github, $offsetX="-60", $offsetY="-20")

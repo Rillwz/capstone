@@ -1,18 +1,40 @@
 ---
-// Kategori — index of the 11 work units; each one has its own page.
-import { ChevronRight } from "@lucide/astro";
+// Kategori — index of the work units; each one has its own page.
+// Daftar kategori dibaca dari tabel `categories` (dinamis, dibaca per render). Tambah,
+// edit, dan hapus berjalan lewat Astro Action, lalu halaman dirender ulang oleh router
+// tanpa muat penuh.
+import { ChevronRight, Pencil, Plus, Tags, Trash, X } from "@lucide/astro";
+import Button from "../../components/ui/Button.astro";
+import Input from "../../components/ui/Input.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
-import { categories } from "../../lib/categories";
+import { ICON_PALETTE, listCategories } from "../../lib/categories";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
+
+// Dibaca di sini, per request — bukan konstanta modul, yang akan beku setelah perubahan.
+const categories = listCategories();
+
+// Opsi ikon untuk modal tambah & edit: [kunci, komponen ikon], urut seperti palet.
+const iconOptions = Object.entries(ICON_PALETTE);
 ---
 
 <DashboardLayout title="Kategori" user={session.user}>
-  <div data-reveal="up">
-    <h1 class="text-xl font-semibold text-slate-900">Kategori</h1>
-    <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
+  <div class="flex items-start justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Kategori</h1>
+      <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <Button size="sm" variant="danger" type="button" data-delete-open disabled={categories.length === 0}>
+        <Trash class="size-4" />Hapus
+      </Button>
+      <Button size="sm" variant="outline" type="button" data-edit-open disabled={categories.length === 0}>
+        <Pencil class="size-4" />Edit
+      </Button>
+      <Button size="sm" type="button" data-add-open><Plus class="size-4" />Tambah</Button>
+    </div>
   </div>
 
   <ul class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -36,4 +58,389 @@ if (session instanceof Response) return session;
       ))
     }
   </ul>
+
+  {
+    categories.length === 0 && (
+      <div class="mt-6 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+        <Tags class="size-8 text-slate-300" />
+        <p class="text-sm font-medium text-slate-900">Belum ada kategori</p>
+        <p class="max-w-sm text-sm text-slate-500">Tambahkan unit kerja pertama dengan tombol "Tambah"</p>
+      </div>
+    )
+  }
+
+  <dialog id="edit-list-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-lg" aria-labelledby="edit-list-dialog-title">
+    <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+      <div>
+        <h2 id="edit-list-dialog-title" class="text-base font-semibold text-slate-900">Edit kategori</h2>
+        <p class="mt-0.5 text-xs text-slate-500">Klik satu kategori untuk mengubahnya.</p>
+      </div>
+      <button
+        type="button"
+        data-dialog-close
+        aria-label="Tutup"
+        class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+
+    <div class="mt-4 max-h-[60vh] overflow-y-auto border-y border-slate-200">
+      {
+        categories.length === 0 ? (
+          <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada kategori.</p>
+        ) : (
+          <ul class="divide-y divide-slate-100">
+            {categories.map(({ id, label, icon: Icon, iconKey }) => (
+              <li>
+                <button
+                  type="button"
+                  data-edit-pick
+                  data-id={id}
+                  data-label={label}
+                  data-icon={iconKey}
+                  class="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-brand-600 sm:px-6"
+                >
+                  <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">
+                    <Icon class="size-4" />
+                  </span>
+                  <span class="min-w-0 flex-1 text-sm font-medium text-slate-900 uppercase">{label}</span>
+                  <ChevronRight class="size-4 shrink-0 text-slate-400" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </div>
+
+    <div class="flex justify-end p-5 sm:px-6">
+      <Button variant="outline" type="button" data-dialog-close>Tutup</Button>
+    </div>
+  </dialog>
+
+  <dialog id="edit-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-lg" aria-labelledby="edit-dialog-title">
+    {/* Wadah field — submit-nya ditangani Astro Action. */}
+    <form method="POST" data-edit-form>
+      <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+        <div>
+          <h2 id="edit-dialog-title" class="text-base font-semibold text-slate-900">Ubah kategori</h2>
+          <p data-edit-subtitle class="mt-0.5 text-xs text-slate-500"></p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <div class="grid gap-4 p-5 sm:px-6">
+        <Input label="Nama kategori" name="label" id="field-edit-label" required />
+        <fieldset>
+          <legend class="mb-1.5 block text-sm font-medium text-slate-700">Ikon</legend>
+          <div class="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+            {
+              iconOptions.map(([key, Icon]) => (
+                <label
+                  class="grid cursor-pointer place-items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:text-slate-900 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50 has-[:checked]:text-brand-700"
+                  title={key}
+                >
+                  <input type="radio" name="icon" value={key} class="sr-only" />
+                  <Icon class="size-4" />
+                </label>
+              ))
+            }
+          </div>
+        </fieldset>
+      </div>
+
+      <p data-edit-error hidden class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"></p>
+
+      <div class="flex flex-col-reverse gap-2 p-5 pt-0 sm:flex-row sm:justify-end sm:px-6">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        <Button type="submit" data-edit-submit>Simpan</Button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="add-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-lg" aria-labelledby="add-dialog-title">
+    {/* Wadah field — submit-nya ditangani Astro Action. */}
+    <form method="POST" data-add-form>
+      <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+        <div>
+          <h2 id="add-dialog-title" class="text-base font-semibold text-slate-900">Tambah kategori</h2>
+          <p class="mt-0.5 text-xs text-slate-500">Buat unit kerja baru.</p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <div class="grid gap-4 p-5 sm:px-6">
+        <Input label="Nama kategori" name="label" placeholder="mis. Keprotokolan" required />
+        <fieldset>
+          <legend class="mb-1.5 block text-sm font-medium text-slate-700">Ikon</legend>
+          <div class="grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+            {
+              iconOptions.map(([key, Icon], index) => (
+                <label
+                  class="grid cursor-pointer place-items-center rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:text-slate-900 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50 has-[:checked]:text-brand-700"
+                  title={key}
+                >
+                  <input
+                    type="radio"
+                    name="icon"
+                    value={key}
+                    checked={index === 0}
+                    class="sr-only"
+                  />
+                  <Icon class="size-4" />
+                </label>
+              ))
+            }
+          </div>
+        </fieldset>
+      </div>
+
+      <p data-add-error hidden class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"></p>
+
+      <div class="flex flex-col-reverse gap-2 p-5 pt-0 sm:flex-row sm:justify-end sm:px-6">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        <Button type="submit" data-add-submit>Simpan</Button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="delete-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-lg" aria-labelledby="delete-dialog-title">
+    {/* Wadah field — submit-nya ditangani Astro Action. */}
+    <form method="POST" data-delete-form>
+      <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+        <div>
+          <h2 id="delete-dialog-title" class="text-base font-semibold text-slate-900">Hapus kategori</h2>
+          <p class="mt-0.5 text-xs text-slate-500">
+            Kategori yang dihapus bersama seluruh jenis aktivitas dan penugasannya.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <div class="mt-4 max-h-[50vh] overflow-y-auto border-y border-slate-200">
+        {
+          categories.length === 0 ? (
+            <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada kategori untuk dihapus.</p>
+          ) : (
+            <ul class="divide-y divide-slate-100">
+              {categories.map(({ id, label }) => (
+                <li>
+                  <label class="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50 has-[:focus-visible]:bg-slate-50 sm:px-6">
+                    <input type="radio" name="id" value={id} class="size-4 shrink-0 accent-brand-600" />
+                    <span class="min-w-0 flex-1 text-sm font-medium text-slate-900 uppercase">{label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </div>
+
+      <div class="flex flex-col-reverse gap-2 p-5 sm:flex-row sm:justify-end sm:px-6">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={categories.length === 0}>
+          <Trash class="size-4" />Hapus
+        </Button>
+      </div>
+    </form>
+  </dialog>
 </DashboardLayout>
+
+<script>
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
+
+  // The router swaps the DOM but keeps this module, so the dialogs are wired again on
+  // every astro:page-load.
+  const init = () => {
+    // The body is replaced on every navigation, so this marker is per page.
+    if (document.body.dataset.categoriesWired) return;
+    document.body.dataset.categoriesWired = "1";
+
+    const dialogOf = (id: string) => document.getElementById(id) as HTMLDialogElement | null;
+
+    /** Sambungkan tombol buka (opsional) dan semua tombol tutup di dalam dialog. */
+    const wireDialog = (dialogId: string, openSelector?: string) => {
+      const dialog = dialogOf(dialogId);
+      if (!dialog) return;
+
+      if (openSelector) {
+        document.querySelector(openSelector)?.addEventListener("click", () => dialog.showModal());
+      }
+      dialog
+        .querySelectorAll("[data-dialog-close]")
+        .forEach((button) => button.addEventListener("click", () => dialog.close()));
+    };
+
+    wireDialog("add-dialog", "[data-add-open]");
+    wireDialog("delete-dialog", "[data-delete-open]");
+    wireDialog("edit-list-dialog", "[data-edit-open]");
+    wireDialog("edit-dialog"); // dibuka dari daftar edit, bukan tombol
+
+    // Tombol Hapus hanya hidup setelah satu kategori dipilih — tanpa ini klik pada
+    // tombol terlihat "mati" karena validasi browser tidak tampil di dalam modal.
+    const deleteDialog = dialogOf("delete-dialog");
+    const deleteForm = document.querySelector<HTMLFormElement>("[data-delete-form]");
+    const deleteSubmit = document.querySelector<HTMLButtonElement>("[data-delete-submit]");
+
+    const syncDeleteButton = () => {
+      const picked = deleteDialog?.querySelector<HTMLInputElement>('input[name="id"]:checked') ?? null;
+      if (deleteSubmit) deleteSubmit.disabled = !picked;
+    };
+
+    deleteDialog?.querySelectorAll<HTMLInputElement>('input[name="id"]').forEach((radio) => {
+      radio.addEventListener("change", syncDeleteButton);
+    });
+    document.querySelector("[data-delete-open]")?.addEventListener("click", syncDeleteButton);
+    deleteDialog?.addEventListener("close", () => {
+      deleteForm?.reset();
+      syncDeleteButton();
+    });
+    syncDeleteButton();
+
+    const editDialog = dialogOf("edit-dialog");
+    const editForm = document.querySelector<HTMLFormElement>("[data-edit-form]");
+    const editError = document.querySelector<HTMLElement>("[data-edit-error]");
+
+    // Klik kategori di daftar edit mengisi form dari data atribut — tanpa navigasi,
+    // jadi modal bisa dibuka-tutup bebas dan perubahan langsung terlihat.
+    document.querySelectorAll<HTMLButtonElement>("[data-edit-pick]").forEach((pick) => {
+      pick.addEventListener("click", () => {
+        if (!editDialog || !editForm) return;
+        dialogOf("edit-list-dialog")?.close();
+
+        editForm.dataset.categoryId = pick.dataset.id ?? "";
+        const labelInput = editForm.querySelector<HTMLInputElement>('input[name="label"]');
+        if (labelInput) labelInput.value = pick.dataset.label ?? "";
+
+        // Ikon terpilih: cocokkan nilai radio dengan kunci ikon baris ini.
+        editForm.querySelectorAll<HTMLInputElement>('input[name="icon"]').forEach((radio) => {
+          radio.checked = radio.value === pick.dataset.icon;
+        });
+
+        const subtitle = document.querySelector<HTMLElement>("[data-edit-subtitle]");
+        if (subtitle) subtitle.textContent = pick.dataset.label ?? "";
+        if (editError) {
+          editError.hidden = true;
+          editError.textContent = "";
+        }
+
+        editDialog.showModal();
+        labelInput?.focus();
+        labelInput?.select();
+      });
+    });
+
+    /** Matikan tombol selama permintaan berjalan, supaya tidak double-submit. */
+    const withBusy = async (button: HTMLButtonElement | null, run: () => Promise<void>) => {
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      try {
+        await run();
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    // Tambah kategori.
+    const addForm = document.querySelector<HTMLFormElement>("[data-add-form]");
+    const addError = document.querySelector<HTMLElement>("[data-add-error]");
+    addForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(addForm);
+
+      await withBusy(document.querySelector<HTMLButtonElement>("[data-add-submit]"), async () => {
+        const { error } = await actions.createCategory({
+          label: String(data.get("label") ?? "").trim(),
+          icon: String(data.get("icon") ?? "tags"),
+        });
+        if (error) {
+          if (addError) {
+            addError.textContent = error.message ?? "Kategori gagal dibuat.";
+            addError.hidden = false;
+          }
+          return;
+        }
+        if (addError) addError.hidden = true;
+
+        dialogOf("add-dialog")?.close();
+        addForm.reset();
+        await refreshPage();
+        toast("Kategori ditambahkan.");
+      });
+    });
+
+    // Ubah kategori.
+    editForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = editForm.dataset.categoryId ?? "";
+      if (!id) return;
+      const data = new FormData(editForm);
+
+      await withBusy(document.querySelector<HTMLButtonElement>("[data-edit-submit]"), async () => {
+        const { error } = await actions.updateCategory({
+          id,
+          label: String(data.get("label") ?? "").trim(),
+          icon: String(data.get("icon") ?? "tags"),
+        });
+        if (error) {
+          if (editError) {
+            editError.textContent = error.message ?? "Kategori gagal disimpan.";
+            editError.hidden = false;
+          }
+          return;
+        }
+        if (editError) editError.hidden = true;
+
+        editDialog?.close();
+        await refreshPage();
+        toast("Kategori diperbarui.");
+      });
+    });
+
+    // Hapus satu kategori (radio).
+    deleteForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = String(new FormData(deleteForm).get("id") ?? "");
+      if (!id) return;
+      if (!confirm("Hapus kategori ini beserta seluruh aktivitas dan penugasannya?")) return;
+
+      await withBusy(deleteSubmit, async () => {
+        const { error } = await actions.deleteCategory({ id });
+        if (error) {
+          toast(error.message ?? "Kategori gagal dihapus.", "error");
+          return;
+        }
+
+        deleteDialog?.close();
+        await refreshPage();
+        toast("Kategori dihapus.");
+      });
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

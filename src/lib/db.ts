@@ -18,8 +18,21 @@ db.exec(`
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role INTEGER NOT NULL DEFAULT 1 CHECK (role IN (0, 1, 2)),
+    jabatan TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Daftar Posisi/Jabatan yang bisa dipilih di form pengguna. Kolom users.jabatan
+  -- menyimpan labelnya (teks), jadi menghapus satu jabatan tidak menghapus akunnya.
+  CREATE TABLE IF NOT EXISTS positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Satu jabatan = satu label, tanpa peduli huruf besar/kecil. Indeks (bukan COLLATE
+  -- pada kolom) supaya database yang tabelnya sudah terlanjur dibuat ikut terkunci.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_label ON positions (label COLLATE NOCASE);
 
   CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +53,36 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_login_logs_user ON login_logs (user_id, id DESC);
+
+  -- Work units (kategori). Ikon disimpan sebagai kunci teks (lihat ICON_PALETTE di
+  -- lib/categories.ts); urutan tampil mengikuti kolom position.
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT 'tags',
+    position INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+// Seed sekali: 11 unit awal, supaya data activities/assignments lama tetap nyambung.
+const categoryCount = (db.prepare("SELECT count(*) AS n FROM categories").get() as { n: number }).n;
+if (categoryCount === 0) {
+  const DEFAULT_CATEGORIES: Array<[string, string, string]> = [
+    ["tata-usaha", "Tata Usaha", "clipboard-list"],
+    ["kesekretariatan", "Kesekretariatan", "file-text"],
+    ["keuangan", "Keuangan", "wallet"],
+    ["sarpras", "SARPRAS", "warehouse"],
+    ["kepegawaian", "KEPEGAWAIAN", "user-cog"],
+    ["humas", "HUMAS", "megaphone"],
+    ["laboran", "LABORAN", "flask-conical"],
+    ["it", "IT", "monitor-smartphone"],
+    ["admin-prodi", "ADMIN PRODI", "graduation-cap"],
+    ["kerumahtanggaan", "KERUMAHTANGGAAN", "broom"],
+    ["kerjasama", "KERJASAMA", "handshake"],
+  ];
+  const seed = db.prepare("INSERT INTO categories (id, label, icon, position) VALUES (?, ?, ?, ?)");
+  db.transaction(() => DEFAULT_CATEGORIES.forEach(([id, label, icon], i) => seed.run(id, label, icon, i)))();
+}
 
 // Activity rows of a work unit (kategori) — the "Jenis Aktivitas Unit Kerja" table.
 db.exec(`
@@ -137,6 +179,12 @@ if (!postColumns.some((column) => column.name === "position")) {
   `);
 }
 
+// Migration: `jabatan` (posisi/jabatan) was added to the user profile.
+const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+if (!userColumns.some((column) => column.name === "jabatan")) {
+  db.exec("ALTER TABLE users ADD COLUMN jabatan TEXT NOT NULL DEFAULT '';");
+}
+
 // Migration: the period vocabulary grew (Triwulan, Tahunan, Kegiatan — kosakata MPP).
 // The CHECK constraint lives inside the table definition, so a stale table is rebuilt.
 // Foreign keys are switched off while rebuilding, so the assignments, logs and notes
@@ -171,12 +219,73 @@ if (activitiesSchema && !activitiesSchema.sql.includes("'Triwulan'")) {
   db.pragma("foreign_keys = ON");
 }
 
+// ---------------------------------------------------------------------------
+// Kategori (unit kerja): baris dinamis di tabel categories.
+// ---------------------------------------------------------------------------
+
+export interface CategoryRow {
+  id: string;
+  label: string;
+  icon: string;
+  position: number;
+}
+
+export function listCategories(): CategoryRow[] {
+  return db.prepare("SELECT id, label, icon, position FROM categories ORDER BY position, label COLLATE NOCASE").all() as CategoryRow[];
+}
+
+export function getCategory(id: string): CategoryRow | undefined {
+  return db.prepare("SELECT id, label, icon, position FROM categories WHERE id = ?").get(id) as CategoryRow | undefined;
+}
+
+/** Buat kategori baru; id adalah slug dari label. Mengembalikan id-nya atau null bila slug sudah dipakai. */
+export function createCategory(label: string, icon: string): string | null {
+  const base = label.toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "kategori";
+  const taken = new Set(
+    (db.prepare("SELECT id FROM categories").all() as Array<{ id: string }>).map((row) => row.id),
+  );
+  let id = base;
+  for (let i = 2; taken.has(id); i++) id = `${base}-${i}`;
+  const max = (db.prepare("SELECT COALESCE(MAX(position), -1) AS p FROM categories").get() as { p: number }).p;
+  try {
+    db.prepare("INSERT INTO categories (id, label, icon, position) VALUES (?, ?, ?, ?)").run(id, label.trim(), icon, max + 1);
+  } catch {
+    return null;
+  }
+  return id;
+}
+
+/** Ubah nama & ikon kategori. Mengembalikan false bila id-nya tidak ada — id tidak pernah berubah, jadi data anak aman. */
+export function updateCategory(id: string, label: string, icon: string): boolean {
+  const info = db.prepare("UPDATE categories SET label = ?, icon = ? WHERE id = ?").run(label.trim(), icon, id);
+  return info.changes > 0;
+}
+
+/** Hapus kategori beserta aktivitas, penugasan, log dan catatannya. */
+export function deleteCategory(id: string): void {
+  db.transaction(() => {
+    db.prepare(
+      `DELETE FROM occurrence_notes WHERE activity_id IN (SELECT id FROM activities WHERE category_id = ?)`,
+    ).run(id);
+    db.prepare("DELETE FROM assignments WHERE category_id = ?").run(id);
+    db.prepare(
+      `DELETE FROM activity_logs WHERE activity_id IN (SELECT id FROM activities WHERE category_id = ?)`,
+    ).run(id);
+    db.prepare("DELETE FROM activities WHERE category_id = ?").run(id);
+    db.prepare("DELETE FROM categories WHERE id = ?").run(id);
+  })();
+}
+
 export interface UserRow {
   id: number;
   name: string;
   email: string;
   password_hash: string;
   role: 0 | 1 | 2;
+  jabatan: string;
   created_at: string;
 }
 
@@ -197,14 +306,73 @@ export function updateUserProfile(id: number, name: string, passwordHash?: strin
   }
 }
 
-export function createUser(name: string, email: string, passwordHash: string, role: 0 | 1 | 2): UserRow {
-  db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)").run(
+export function createUser(
+  name: string,
+  email: string,
+  passwordHash: string,
+  role: 0 | 1 | 2,
+  jabatan = "",
+): UserRow {
+  db.prepare("INSERT INTO users (name, email, password_hash, role, jabatan) VALUES (?, ?, ?, ?, ?)").run(
     name,
     email.toLowerCase(),
     passwordHash,
     role,
+    jabatan.trim(),
   );
   return getUserByEmail(email)!;
+}
+
+/** Admin edit of another account: name, email, jabatan and level in one write. */
+export function updateUserAccount(
+  id: number,
+  name: string,
+  email: string,
+  jabatan: string,
+  role: 0 | 1 | 2,
+): boolean {
+  const info = db
+    .prepare("UPDATE users SET name = ?, email = ?, jabatan = ?, role = ? WHERE id = ?")
+    .run(name, email.toLowerCase(), jabatan.trim(), role, id);
+  return info.changes > 0;
+}
+
+export interface PositionRow {
+  id: number;
+  label: string;
+}
+
+export function listPositions(): PositionRow[] {
+  return db
+    .prepare("SELECT id, label FROM positions ORDER BY label COLLATE NOCASE")
+    .all() as PositionRow[];
+}
+
+/** Add a Posisi/Jabatan. Throws on a duplicate label (SQLITE_CONSTRAINT_UNIQUE). */
+export function createPosition(label: string): void {
+  db.prepare("INSERT INTO positions (label) VALUES (?)").run(label.trim());
+}
+
+/**
+ * Rename a Posisi/Jabatan and follow it through to the accounts that use it, so
+ * `users.jabatan` stays in sync with the list the dropdown offers.
+ */
+export function updatePosition(id: number, label: string): boolean {
+  return db.transaction(() => {
+    const row = db.prepare("SELECT label FROM positions WHERE id = ?").get(id) as
+      | { label: string }
+      | undefined;
+    if (!row) return false;
+    const next = label.trim();
+    db.prepare("UPDATE positions SET label = ? WHERE id = ?").run(next, id);
+    db.prepare("UPDATE users SET jabatan = ? WHERE jabatan = ?").run(next, row.label);
+    return true;
+  })();
+}
+
+/** Remove a Posisi/Jabatan. Accounts keep the text they already have. */
+export function deletePosition(id: number): void {
+  db.prepare("DELETE FROM positions WHERE id = ?").run(id);
 }
 
 export interface PostRow {
@@ -243,6 +411,7 @@ export interface ManagedUser {
   name: string;
   email: string;
   role: 0 | 1 | 2;
+  jabatan: string;
   created_at: string;
   last_login: LoginLogRow | null;
 }
@@ -322,7 +491,7 @@ export function deletePost(id: number): void {
 /** Admin-facing user list: explicit columns, so the password hash never leaves the DB. */
 export function listUsers(): ManagedUser[] {
   const users = db
-    .prepare("SELECT id, name, email, role, created_at FROM users ORDER BY role, name COLLATE NOCASE")
+    .prepare("SELECT id, name, email, role, jabatan, created_at FROM users ORDER BY role, name COLLATE NOCASE")
     .all() as Array<Omit<ManagedUser, "last_login">>;
 
   const logs = db
@@ -903,6 +1072,24 @@ export function listDailyActivity(userId: number): {
     (a, b) => b - a,
   );
   return { days, years };
+}
+
+/**
+ * Rekap harian satu tahun, bentuk objek supaya bisa dikirim ke klien.
+ *
+ * Grafik hanya menampilkan satu tahun, jadi klien cukup menerima tahun yang sedang
+ * dilihat — bukan seluruh riwayat.
+ */
+export function dailyActivityByYear(
+  userId: number,
+  year: number,
+): Record<string, { done: number; missed: number }> {
+  const days = listDailyActivity(userId).days;
+  const out: Record<string, { done: number; missed: number }> = {};
+  for (const [date, bucket] of days) {
+    if (Number(date.slice(0, 4)) === year) out[date] = bucket;
+  }
+  return out;
 }
 
 export function listHistory(userId: number, status?: "selesai" | "terlewat"): HistoryRow[] {

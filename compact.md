@@ -29,12 +29,17 @@ npx astro build
 ## Data
 
 SQLite at `data/app.db` (`src/lib/db.ts` owns the schema and every query).
-Tables: `users`, `posts`, `login_logs`, `activities`, `assignments`, `activity_logs`,
-`occurrence_notes`.
+Tables: `users`, `positions`, `posts`, `login_logs`, `activities`, `assignments`,
+`activity_logs`, `occurrence_notes`.
 
 `occurrence_notes` is separate from `activity_logs` on purpose: a note must survive an
 undo, and it may exist on a task that is still open. Notes are keyed by
 `(user_id, activity_id, period_key)`.
+
+`positions` is the Posisi/Jabatan list behind the dropdown on `/dashboard/users` (unique
+label, case-insensitive via `idx_positions_label`). `users.jabatan` stores the label text
+itself, not a foreign key: renaming a position updates the matching accounts, deleting one
+leaves them with the text they already had. It is not part of the session token.
 
 `data/app.db` holds the owner's real data (users `admin@assignment.id`, `dosen1@…`,
 `dosen2@…`, 5 demo activities in tata-usaha with 5 assignments, 2 notes and 5 logs for
@@ -102,6 +107,10 @@ Current actions: `completeTask`, `undoTask`, `saveNote`, `assignActivities`,
 `removeActivity`, `clearAssignments`, `createUserAccount`, `deleteUserAccount`,
 `saveActivity`, `deleteActivities`, `deletePost`, `savePost`.
 
+`completeTask` and `undoTask` also answer with `graph`: the daily buckets of the
+year the client passes as the optional `year` input, so the contribution graph can
+be patched in place. See "Contributions heatmap" below.
+
 Two shapes are in use:
 
 - **In place** (`/user`): the action returns the new state (`taskStats`), the client
@@ -131,6 +140,15 @@ light | dark | paper without any markup change. The grid is plain CSS grid
 (`grid-auto-flow: column`) — its track sizes come from `--cell` / `--gap`, so a
 mistyped `var()` in the inline style silently collapses the whole grid (check the
 computed `grid-auto-columns` if the cells vanish).
+
+The graph is server-rendered, so it has to be patched after every task action:
+each cell carries `data-date`, and the section carries `data-graph` /
+`data-graph-year`. `completeTask` and `undoTask` take an optional `year` and
+answer with `graph` — the daily buckets (`{done, missed}` per date) for that
+year only — and `patchGraph` in `src/scripts/tasks.ts` rewrites the cells, the
+tooltip and the summary from it. Both actions call `materializeOverdue()`
+first, so the numbers equal what a reload would show (an undone late task
+reappears as a missed period, and its red ring comes back).
 
 ## Notable files
 

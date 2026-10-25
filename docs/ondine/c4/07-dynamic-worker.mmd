@@ -1,0 +1,25 @@
+C4Dynamic
+  title Dynamic diagram for Ondine - Serve a diagram as an image
+
+  System_Ext(host, "Markdown Host", "GitHub renders the README image.")
+  Container(router, "Request Router", "TypeScript", "Matches the payload path and the source query.")
+  Container(decoder, "Payload Decoder", "TypeScript, zlib, base64url", "Inflates the payload, or reads the source query parameter.")
+  Container(compiler, "Compiler Core", "Rust, WebAssembly", "Renders the source to SVG.")
+  Container(scheme, "Scheme Resolver", "TypeScript, CSS", "Sets the light, dark, or auto scheme.")
+  Container(errors, "Error Card Builder", "TypeScript", "Builds the error card returned with status 400.")
+
+  Rel(host, router, "Requests the diagram image", "HTTPS")
+  Rel(router, decoder, "Hands the payload to")
+  Rel(decoder, compiler, "Passes the source to")
+  Rel(compiler, scheme, "Hands the SVG to")
+  Rel(scheme, host, "Returns the SVG", "image/svg+xml")
+  Rel(decoder, errors, "Reports a bad payload to")
+  Rel(errors, host, "Returns the error card", "400")
+
+  UpdateRelStyle(host, router, $offsetY="-30")
+  UpdateRelStyle(router, decoder, $offsetY="-30")
+  UpdateRelStyle(decoder, compiler, $offsetY="-30")
+  UpdateRelStyle(compiler, scheme, $offsetY="-40")
+  UpdateRelStyle(scheme, host, $offsetY="-50")
+  UpdateRelStyle(decoder, errors, $offsetY="-20", $offsetX="60")
+  UpdateRelStyle(errors, host, $offsetY="60")

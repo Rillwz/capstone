@@ -93,6 +93,15 @@ export function formatPeriod(periode: Periode, key: string): string {
   }
 }
 
+/** Tooltip satu kotak grafik kontribusi: "21 Okt 2026 · 3 selesai · 1 terlewat". */
+export function graphCellTitle(date: string, done: number, missed: number): string {
+  const parts = [formatDate(date)];
+  if (done > 0) parts.push(`${done} selesai`);
+  if (missed > 0) parts.push(`${missed} terlewat`);
+  if (done === 0 && missed === 0) parts.push("tidak ada aktivitas");
+  return parts.join(" · ");
+}
+
 export function roleLabel(role: number): string {
   return role === 0 ? "Admin" : `Level ${role}`;
 }
