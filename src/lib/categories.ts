@@ -22,6 +22,7 @@ import {
   Wallet,
   Warehouse,
   Tags,
+  Zap,
   type AstroComponent,
 } from "@lucide/astro";
 import { getCategory, listCategories as listCategoryRows } from "./db";
@@ -48,6 +49,7 @@ export const ICON_PALETTE = {
   package: Package,
   "calendar-days": CalendarDays,
   tags: Tags,
+  zap: Zap,
 } satisfies Record<string, AstroComponent>;
 
 type IconKey = keyof typeof ICON_PALETTE;

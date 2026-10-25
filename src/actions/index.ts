@@ -10,7 +10,9 @@ import {
   completeOccurrence,
   createActivity,
   createAssignments,
+  createAssignmentsBulk,
   createCategory,
+  createDirectAssignment,
   createPost,
   createPosition,
   createUser,
@@ -19,9 +21,12 @@ import {
   deleteAssignment,
   deleteAssignmentActivity,
   deleteCategory,
+  deleteDirectAssignment,
   deletePost,
   deletePosition,
   deleteUser,
+  getUserById,
+  markAssignmentsSeen,
   materializeOverdue,
   setOccurrenceNote,
   taskStats,
@@ -58,6 +63,23 @@ async function currentAdminId(context: ActionAPIContext): Promise<number> {
     throw new ActionError({ code: "FORBIDDEN", message: "Hanya admin yang bisa melakukan ini." });
   }
   return id;
+}
+
+/**
+ * Siapa yang boleh memberikan penugasan langsung: admin (level 0) dan atasan (level 1).
+ * Level 2 tidak pernah boleh menugaskan.
+ */
+async function currentAssigner(context: ActionAPIContext): Promise<{ id: number; role: number }> {
+  const session = await getSession(context.request);
+  const id = Number(session?.user?.id);
+  if (!session || !Number.isInteger(id)) {
+    throw new ActionError({ code: "UNAUTHORIZED", message: "Sesi Anda sudah berakhir." });
+  }
+  const role = session.user?.role;
+  if (role !== 0 && role !== 1) {
+    throw new ActionError({ code: "FORBIDDEN", message: "Anda tidak berhak memberikan penugasan." });
+  }
+  return { id, role };
 }
 
 const occurrence = z.object({
@@ -148,6 +170,19 @@ export const server = {
     },
   }),
 
+  /** Kebalikannya: sejumlah aktivitas diberikan ke banyak user sekaligus. */
+  assignActivitiesToUsers: defineAction({
+    input: z.object({
+      userIds: z.array(z.number().int().positive()).min(1).max(200),
+      activityIds: z.array(z.number().int().positive()).min(1).max(500),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const added = createAssignmentsBulk(input.userIds, input.activityIds);
+      return { added, skipped: input.userIds.length * input.activityIds.length - added };
+    },
+  }),
+
   /** Lepas satu aktivitas dari satu user. */
   removeActivity: defineAction({
     input: z.object({
@@ -167,6 +202,91 @@ export const server = {
     handler: async (input, context) => {
       await currentAdminId(context);
       deleteAssignment(input.userId);
+      return {};
+    },
+  }),
+
+  /**
+   * Tandai "pekerjaan masuk" milik sesi ini sudah dibaca. Tanpa parameter userId:
+   * klien tidak boleh menandai milik orang lain.
+   */
+  markAssignmentsSeen: defineAction({
+    input: z.object({}),
+    handler: async (_input, context) => {
+      const userId = await currentUserId(context);
+      return { seen: markAssignmentsSeen(userId) };
+    },
+  }),
+
+  // -------------------------------------------------------------------------
+  // Penugasan Langsung: admin & level 1.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Buat aktivitas master sekaligus memberikannya ke beberapa pengguna.
+   * `createdBy` selalu dari sesi — klien tidak boleh mengaku-ngaku sebagai pemberi.
+   */
+  createDirectAssignment: defineAction({
+    input: z.object({
+      name: z.string().min(3).max(500),
+      day: z.number().int().min(0).max(31),
+      utama: z.boolean(),
+      periodik: z.boolean(),
+      bukan_tupoksi: z.boolean(),
+      periode: z.enum([...PERIODES]),
+      frequency: z.number().int().min(1).max(9999),
+      minutes: z.number().int().min(1).max(9999),
+      sdm: z.number().int().min(1).max(999),
+      month: z.string().length(7).optional(),
+      userIds: z.array(z.number().int().positive()).min(1).max(200),
+    }),
+    handler: async (input, context) => {
+      const assigner = await currentAssigner(context);
+
+      const parsed = parseActivityValues(
+        {
+          name: input.name,
+          day: input.day,
+          utama: input.utama,
+          periodik: input.periodik,
+          bukan_tupoksi: input.bukan_tupoksi,
+          periode: input.periode,
+          frequency: input.frequency,
+          minutes: input.minutes,
+          sdm: input.sdm,
+        },
+        input.month,
+      );
+      if ("error" in parsed) {
+        throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
+      }
+
+      // Target hanya level 1 & 2 — admin tidak memegang penugasan, dan level 1 tidak
+      // boleh menugaskan ke admin. Ditolak di server, bukan sekadar disaring di layar.
+      const targets = input.userIds.filter((id) => {
+        const row = getUserById(id);
+        return row !== undefined && row.role !== 0;
+      });
+      if (targets.length === 0) {
+        throw new ActionError({ code: "BAD_REQUEST", message: "Pilih minimal satu pengguna yang sah." });
+      }
+
+      return createDirectAssignment(parsed.value, targets, assigner.id);
+    },
+  }),
+
+  /** Lepas satu penugasan langsung; hanya yang memang diberikan sesi ini. */
+  removeDirectAssignment: defineAction({
+    input: z.object({ id: z.number().int().positive() }),
+    handler: async (input, context) => {
+      const assigner = await currentAssigner(context);
+      const removed = deleteDirectAssignment(input.id, assigner.id);
+      if (!removed) {
+        throw new ActionError({
+          code: "FORBIDDEN",
+          message: "Penugasan ini bukan milik Anda atau sudah dilepas.",
+        });
+      }
       return {};
     },
   }),
@@ -396,7 +516,13 @@ export const server = {
     input: z.object({ id: z.string().min(1).max(60) }),
     handler: async (input, context) => {
       await currentAdminId(context);
-      deleteCategory(input.id);
+      const deleted = deleteCategory(input.id);
+      if (!deleted) {
+        throw new ActionError({
+          code: "FORBIDDEN",
+          message: "Unit sistem tidak bisa dihapus.",
+        });
+      }
       return {};
     },
   }),

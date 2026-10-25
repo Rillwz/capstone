@@ -11,6 +11,13 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 const db = new Database(join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 
+/**
+ * Unit sistem tempat aktivitas hasil "Penugasan Langsung" bermuara. Aktivitas yang
+ * lahir dari dialog itu tetap harus punya unit; satu unit khusus membuatnya mudah
+ * ditelusuri dan tidak mengotori tiap-tiap unit kerja.
+ */
+export const DIRECT_CATEGORY = "penugasan-langsung";
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,10 +117,19 @@ db.exec(`
     category_id TEXT NOT NULL,
     activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- NULL = belum dibaca pemegangnya (notifikasi "pekerjaan masuk").
+    seen_at TEXT,
+    -- Siapa yang menugaskan. NULL = baris lama, dianggap diberikan sistem.
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    -- '' = diberikan lewat katalog, 'langsung' = lahir dari dialog Penugasan Langsung.
+    origin TEXT NOT NULL DEFAULT '',
     UNIQUE (user_id, activity_id)
   );
 
   CREATE INDEX IF NOT EXISTS idx_assignments_user ON assignments (user_id);
+
+  -- Sebagian besar query hanya peduli yang belum dibaca, jadi indeks parsial.
+  CREATE INDEX IF NOT EXISTS idx_assignments_unseen ON assignments (user_id) WHERE seen_at IS NULL;
 
   -- Log aktivitas: satu baris per kemunculan (occurrence) — status "selesai" atau "terlewat".
   CREATE TABLE IF NOT EXISTS activity_logs (
@@ -183,6 +199,35 @@ if (!postColumns.some((column) => column.name === "position")) {
 const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
 if (!userColumns.some((column) => column.name === "jabatan")) {
   db.exec("ALTER TABLE users ADD COLUMN jabatan TEXT NOT NULL DEFAULT '';");
+}
+
+// Migration: `seen_at` menandai penugasan yang sudah dibaca pemegangnya (notifikasi
+// "pekerjaan masuk"). NULL = belum dibaca. Penugasan yang sudah ada sebelum fitur ini
+// dianggap sudah dibaca — kalau tidak, lonceng langsung berangka palsu setelah rilis.
+const assignmentColumns = db.prepare("PRAGMA table_info(assignments)").all() as Array<{ name: string }>;
+if (!assignmentColumns.some((column) => column.name === "seen_at")) {
+  db.exec(`
+    ALTER TABLE assignments ADD COLUMN seen_at TEXT;
+    UPDATE assignments SET seen_at = created_at;
+    CREATE INDEX IF NOT EXISTS idx_assignments_unseen ON assignments (user_id) WHERE seen_at IS NULL;
+  `);
+}
+
+// Migration: `created_by` + `origin` lahir bersama Penugasan Langsung. Baris lama
+// dianggap diberikan sistem (created_by NULL, origin ''), jadi tidak perlu diisi.
+if (!assignmentColumns.some((column) => column.name === "created_by")) {
+  db.exec("ALTER TABLE assignments ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;");
+}
+if (!assignmentColumns.some((column) => column.name === "origin")) {
+  db.exec("ALTER TABLE assignments ADD COLUMN origin TEXT NOT NULL DEFAULT '';");
+}
+
+// Unit sistem tempat aktivitas hasil Penugasan Langsung bermuara. Dibuat idempoten,
+// seperti seed 11 unit di atas; position di paling akhir.
+if (!db.prepare("SELECT 1 FROM categories WHERE id = ?").get(DIRECT_CATEGORY)) {
+  db.prepare(
+    "INSERT INTO categories (id, label, icon, position) VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM categories))",
+  ).run(DIRECT_CATEGORY, "Penugasan Langsung", "zap");
 }
 
 // Migration: the period vocabulary grew (Triwulan, Tahunan, Kegiatan — kosakata MPP).
@@ -264,8 +309,11 @@ export function updateCategory(id: string, label: string, icon: string): boolean
   return info.changes > 0;
 }
 
-/** Hapus kategori beserta aktivitas, penugasan, log dan catatannya. */
-export function deleteCategory(id: string): void {
+/** Hapus kategori beserta aktivitas, penugasan, log dan catatannya.
+ *  Unit sistem (Penugasan Langsung) ditolak: `activities.category_id` tidak punya
+ *  foreign key, jadi tanpanya aktivitasnya jadi yatim tanpa unit. */
+export function deleteCategory(id: string): boolean {
+  if (id === DIRECT_CATEGORY) return false;
   db.transaction(() => {
     db.prepare(
       `DELETE FROM occurrence_notes WHERE activity_id IN (SELECT id FROM activities WHERE category_id = ?)`,
@@ -277,6 +325,7 @@ export function deleteCategory(id: string): void {
     db.prepare("DELETE FROM activities WHERE category_id = ?").run(id);
     db.prepare("DELETE FROM categories WHERE id = ?").run(id);
   })();
+  return true;
 }
 
 export interface UserRow {
@@ -690,22 +739,167 @@ export function listActivityCatalog(userId: number) {
 }
 
 /**
- * Insert one assignment per chosen activity. The unit is derived from the activity row
- * itself, so a tampered category in the form cannot attach an activity to another unit.
+ * Insert one assignment per (user, activity) pair. The unit is derived from the
+ * activity row itself, so a tampered category in the form cannot attach an activity
+ * to another unit. Pairs that already exist are skipped by UNIQUE(user_id,
+ * activity_id), so the caller only reports how many were actually new.
  */
-export function createAssignments(userId: number, activityIds: number[]): number {
+export function createAssignmentsBulk(
+  userIds: number[],
+  activityIds: number[],
+  createdBy: number | null = null,
+  origin = "",
+): number {
   const lookup = db.prepare("SELECT category_id FROM activities WHERE id = ?");
   const insert = db.prepare(
-    "INSERT OR IGNORE INTO assignments (user_id, category_id, activity_id) VALUES (?, ?, ?)",
+    "INSERT OR IGNORE INTO assignments (user_id, category_id, activity_id, created_by, origin) VALUES (?, ?, ?, ?, ?)",
   );
   let added = 0;
   db.transaction(() => {
     for (const activityId of activityIds) {
       const row = lookup.get(activityId) as { category_id: string } | undefined;
-      if (row) added += insert.run(userId, row.category_id, activityId).changes;
+      if (!row) continue;
+      for (const userId of userIds) {
+        added += insert.run(userId, row.category_id, activityId, createdBy, origin).changes;
+      }
     }
   })();
   return added;
+}
+
+/** Insert one assignment per chosen activity for a single user. */
+export function createAssignments(userId: number, activityIds: number[]): number {
+  return createAssignmentsBulk([userId], activityIds);
+}
+
+// ---------------------------------------------------------------------------
+// Notifikasi "pekerjaan masuk": penugasan yang belum dibaca pemegangnya.
+// Satuannya penugasan, bukan kemunculan — tugas harian tidak boleh membunyikan
+// lonceng setiap hari.
+// ---------------------------------------------------------------------------
+
+/** Satu penugasan yang belum dibaca. Ikon unitnya diselesaikan di halaman. */
+export interface NewAssignment {
+  id: number;
+  activity_id: number;
+  name: string;
+  category_id: string;
+  periode: string;
+  created_at: string;
+}
+
+/** Jumlah penugasan yang belum dibaca — angka di lonceng. */
+export function countUnseenAssignments(userId: number): number {
+  const row = db
+    .prepare("SELECT count(*) AS n FROM assignments WHERE user_id = ? AND seen_at IS NULL")
+    .get(userId) as { n: number };
+  return row.n;
+}
+
+/** Penugasan yang belum dibaca, terbaru dulu. */
+export function listNewAssignments(userId: number): NewAssignment[] {
+  return db
+    .prepare(
+      `SELECT g.id, g.activity_id, ac.name, g.category_id, ac.periode, g.created_at
+       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+       WHERE g.user_id = ? AND g.seen_at IS NULL
+       ORDER BY g.created_at DESC, g.id DESC`,
+    )
+    .all(userId) as NewAssignment[];
+}
+
+/** Tandai semua penugasan user sudah dibaca. Balikan jumlah baris yang berubah. */
+export function markAssignmentsSeen(userId: number): number {
+  return db
+    .prepare("UPDATE assignments SET seen_at = datetime('now') WHERE user_id = ? AND seen_at IS NULL")
+    .run(userId).changes;
+}
+
+// ---------------------------------------------------------------------------
+// Penugasan Langsung: aktivitas master yang lahir bersama penugasannya.
+// Hidup di unit sistem DIRECT_CATEGORY, dan mencatat siapa yang memberikannya.
+// ---------------------------------------------------------------------------
+
+export interface DirectAssignmentRow {
+  id: number;
+  activity_id: number;
+  name: string;
+  periode: string;
+  user_id: number;
+  user_name: string;
+  jabatan: string;
+  created_at: string;
+}
+
+/**
+ * Buat aktivitas + tugaskan, dalam satu transaksi.
+ *
+ * Nama (tanpa peduli huruf besar/kecil) + periode yang sama di unit sistem dipakai
+ * ulang, bukan diduplikasi — "Buat MasterDB" justru soal master yang bersih.
+ *
+ * shortcut: kecocokan mengabaikan `day`, jadi dua pekerjaan dengan nama & periode
+ * sama dianggap satu definisi. Cocokkan `date` juga kalau kelak perlu varian tanggal.
+ */
+export function createDirectAssignment(
+  input: ActivityInput,
+  userIds: number[],
+  createdBy: number | null,
+): { activityId: number; created: boolean; added: number; skipped: number } {
+  return db.transaction(() => {
+    const existing = db
+      .prepare(
+        `SELECT id FROM activities
+         WHERE category_id = ? AND periode = ? AND name = ? COLLATE NOCASE
+         LIMIT 1`,
+      )
+      .get(DIRECT_CATEGORY, input.periode, input.name) as { id: number } | undefined;
+
+    const created = !existing;
+    const activityId = existing?.id ?? createActivity(DIRECT_CATEGORY, input);
+
+    const added = createAssignmentsBulk(userIds, [activityId], createdBy, "langsung");
+    return {
+      activityId,
+      created,
+      added,
+      skipped: userIds.length - added,
+    };
+  })();
+}
+
+/** Penugasan langsung yang diberikan satu orang, terbaru dulu. */
+export function listDirectAssignmentsBy(createdBy: number): DirectAssignmentRow[] {
+  return db
+    .prepare(
+      `SELECT g.id, g.activity_id, ac.name, ac.periode, g.user_id,
+              u.name AS user_name, u.jabatan, g.created_at
+       FROM assignments g
+       JOIN activities ac ON ac.id = g.activity_id
+       JOIN users u ON u.id = g.user_id
+       WHERE g.created_by = ? AND g.origin = 'langsung'
+       ORDER BY g.created_at DESC, g.id DESC`,
+    )
+    .all(createdBy) as DirectAssignmentRow[];
+}
+
+/** Jumlah penugasan langsung yang diberikan satu orang. */
+export function countDirectAssignmentsBy(createdBy: number): number {
+  const row = db
+    .prepare("SELECT count(*) AS n FROM assignments WHERE created_by = ? AND origin = 'langsung'")
+    .get(createdBy) as { n: number };
+  return row.n;
+}
+
+/**
+ * Lepas satu penugasan langsung. Hanya baris yang memang diberikan `createdBy` itu —
+ * level 1 tidak boleh mencabut penugasan yang diberikan admin.
+ */
+export function deleteDirectAssignment(assignmentId: number, createdBy: number): boolean {
+  return (
+    db
+      .prepare("DELETE FROM assignments WHERE id = ? AND created_by = ? AND origin = 'langsung'")
+      .run(assignmentId, createdBy).changes > 0
+  );
 }
 
 /** Un-assign one activity from a user. */

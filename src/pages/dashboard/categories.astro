@@ -9,12 +9,16 @@ import Input from "../../components/ui/Input.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
 import { ICON_PALETTE, listCategories } from "../../lib/categories";
+import { DIRECT_CATEGORY } from "../../lib/db";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
 
 // Dibaca di sini, per request — bukan konstanta modul, yang akan beku setelah perubahan.
 const categories = listCategories();
+// Unit sistem tetap tampil (aktivitasnya nyata), tapi tidak boleh dihapus: tanpa unit,
+// aktivitasnya jadi yatim karena `activities.category_id` tidak punya foreign key.
+const deletable = categories.filter(({ id }) => id !== DIRECT_CATEGORY);
 
 // Opsi ikon untuk modal tambah & edit: [kunci, komponen ikon], urut seperti palet.
 const iconOptions = Object.entries(ICON_PALETTE);
@@ -27,7 +31,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
       <p class="mt-1 text-sm text-slate-500">Unit kerja di lingkungan sistem informasi tenaga kerja.</p>
     </div>
     <div class="flex items-center gap-2">
-      <Button size="sm" variant="danger" type="button" data-delete-open disabled={categories.length === 0}>
+      <Button size="sm" variant="danger" type="button" data-delete-open disabled={deletable.length === 0}>
         <Trash class="size-4" />Hapus
       </Button>
       <Button size="sm" variant="outline" type="button" data-edit-open disabled={categories.length === 0}>
@@ -52,6 +56,16 @@ const iconOptions = Object.entries(ICON_PALETTE);
             <span class="min-w-0 flex-1 text-sm font-medium tracking-wide text-slate-900 uppercase group-hover:text-brand-700">
               {label}
             </span>
+            {
+              id === DIRECT_CATEGORY && (
+                <span
+                  class="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium tracking-normal text-slate-500 normal-case"
+                  title="Unit sistem — dipakai Penugasan Langsung, tidak bisa dihapus"
+                >
+                  Unit sistem
+                </span>
+              )
+            }
             <ChevronRight class="size-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
           </a>
         </li>
@@ -241,11 +255,11 @@ const iconOptions = Object.entries(ICON_PALETTE);
 
       <div class="mt-4 max-h-[50vh] overflow-y-auto border-y border-slate-200">
         {
-          categories.length === 0 ? (
+          deletable.length === 0 ? (
             <p class="px-5 py-6 text-sm text-slate-500 sm:px-6">Belum ada kategori untuk dihapus.</p>
           ) : (
             <ul class="divide-y divide-slate-100">
-              {categories.map(({ id, label }) => (
+              {deletable.map(({ id, label }) => (
                 <li>
                   <label class="flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50 has-[:focus-visible]:bg-slate-50 sm:px-6">
                     <input type="radio" name="id" value={id} class="size-4 shrink-0 accent-brand-600" />
@@ -260,7 +274,7 @@ const iconOptions = Object.entries(ICON_PALETTE);
 
       <div class="flex flex-col-reverse gap-2 p-5 sm:flex-row sm:justify-end sm:px-6">
         <Button variant="outline" type="button" data-dialog-close>Batal</Button>
-        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={categories.length === 0}>
+        <Button variant="dangerSolid" type="submit" data-delete-submit disabled={deletable.length === 0}>
           <Trash class="size-4" />Hapus
         </Button>
       </div>

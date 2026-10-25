@@ -1,0 +1,370 @@
+---
+// Dialog "Penugasan Langsung" — melahirkan aktivitas master sekaligus menugaskannya.
+//
+// Dipakai dua tempat (admin di /dashboard/assignments, level 1 di /user/penugasan),
+// jadi markup dan script-nya tinggal di sini: satu salinan, tidak bisa menyimpang.
+// Formulir ini cuma wadah field — submit-nya ditangani Astro Action.
+import { ClipboardCheck, Search, X } from "@lucide/astro";
+import Button from "../ui/Button.astro";
+import ChoiceGroup from "../ui/ChoiceGroup.astro";
+import Input from "../ui/Input.astro";
+import { CLASSIFICATIONS, PERIODES } from "../../lib/activities";
+
+interface Props {
+  /** Daftar penerima yang boleh dipilih — sudah disaring peran oleh halaman. */
+  members: Array<{ id: number; name: string; email: string; role: number; jabatan: string }>;
+}
+
+const { members } = Astro.props;
+
+const jabatanBadge =
+  "inline-block max-w-full truncate rounded-md bg-slate-100 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-slate-600";
+const noJabatanBadge =
+  "inline-block max-w-full truncate rounded-md border border-dashed border-slate-200 px-1.5 py-0.5 align-middle text-[11px] leading-4 text-slate-400";
+
+const level1 = members.filter((member) => member.role === 1);
+const level2 = members.filter((member) => member.role === 2);
+---
+
+<dialog id="direct-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-2xl" aria-labelledby="direct-title">
+  <form method="POST" data-direct-form>
+    <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+      <div>
+        <h2 id="direct-title" class="text-base font-semibold text-slate-900">Penugasan Langsung</h2>
+        <p class="mt-0.5 text-xs text-slate-500">
+          Buat jenis aktivitasnya, lalu tunjuk siapa yang mengerjakannya.
+        </p>
+      </div>
+      <button
+        type="button"
+        data-dialog-close
+        aria-label="Tutup"
+        class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+
+    <p
+      data-direct-error
+      hidden
+      class="mx-5 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 sm:mx-6"
+      role="alert"
+    >
+    </p>
+
+    <div class="mt-4 max-h-[58vh] overflow-y-auto border-y border-slate-200">
+      <section class="px-5 py-4 sm:px-6">
+        <p class="text-sm font-medium text-slate-900">1. Aktivitas</p>
+        <p class="mt-0.5 text-xs text-slate-500">Masuk ke unit Penugasan Langsung.</p>
+
+        <div class="mt-3 grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <Input
+              label="Jenis aktivitas"
+              name="direct-name"
+              placeholder="mis. Menyusun laporan kegiatan bulanan"
+              required
+            />
+          </div>
+          <Input label="Setiap Tanggal" name="direct-day" type="text" inputmode="numeric" value="0" />
+          <Input label="Durasi (menit)" name="direct-minutes" type="number" value="60" required />
+          <div class="sm:col-span-2">
+            <ChoiceGroup
+              label="Periode"
+              name="direct-periode"
+              options={PERIODES.map((periode) => ({ value: periode, label: periode }))}
+              value="Bulanan"
+            />
+          </div>
+          <div class="sm:col-span-2">
+            <ChoiceGroup
+              label="Klasifikasi"
+              multiple
+              options={CLASSIFICATIONS}
+              hint="Bisa pilih lebih dari satu, atau tidak sama sekali."
+            />
+          </div>
+          <div class="grid gap-4 sm:col-span-2 sm:grid-cols-3">
+            <Input label="Frekuensi/ Tahun" name="direct-frequency" type="number" value="12" required />
+            <Input label="Jumlah SDM" name="direct-sdm" type="number" value="1" required />
+            <div>
+              <span class="mb-1.5 block text-sm font-medium text-slate-700">Volume Kerja</span>
+              <p
+                data-direct-volume
+                class="flex h-11 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-700 tabular-nums"
+              >
+                720
+              </p>
+              <p class="mt-1.5 text-xs text-slate-500">frekuensi × durasi × SDM.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="border-t border-slate-200 px-5 py-4 sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="text-sm font-medium text-slate-900">2. Pengguna</p>
+            <p data-direct-user-count class="text-xs text-slate-500">
+              {members.length} pengguna
+            </p>
+          </div>
+          <button
+            type="button"
+            data-direct-user-all
+            class="text-xs font-medium text-brand-600 transition-colors hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-brand-600"
+          >
+            Pilih semua
+          </button>
+        </div>
+
+        <div class="relative mt-2">
+          <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+          <label for="direct-user-search" class="sr-only">Cari pengguna</label>
+          <input
+            id="direct-user-search"
+            type="search"
+            data-direct-user-search
+            autocomplete="off"
+            placeholder="Cari nama, email, atau jabatan"
+            class="h-9 w-full rounded-lg border border-slate-300 bg-white pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600 [&::-webkit-search-cancel-button]:appearance-none"
+          />
+        </div>
+
+        {/* Dikelompokkan per level: level 1 boleh menugaskan ke sesama level 1, jadi
+            pilihannya harus terlihat sadar, bukan satu daftar campur. */}
+        {
+          [
+            { key: "1", label: "Level 1", rows: level1 },
+            { key: "2", label: "Level 2", rows: level2 },
+          ]
+            .filter((group) => group.rows.length > 0)
+            .map((group) => (
+              <div class="mt-3" data-direct-group>
+                <p class="px-1 pb-1.5 text-xs font-medium tracking-wide text-slate-400 uppercase">
+                  {group.label}
+                </p>
+                <ul class="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {group.rows.map((member) => (
+                    <li
+                      data-direct-user-item
+                      data-search={`${member.name} ${member.email} ${member.jabatan}`.toLowerCase()}
+                    >
+                      <label class="flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-slate-50 has-[:checked]:bg-brand-50 max-sm:items-start">
+                        <input
+                          type="checkbox"
+                          name="directUserIds"
+                          value={member.id}
+                          data-direct-user
+                          class="size-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-600 max-sm:mt-0.5"
+                        />
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-sm text-slate-900">{member.name}</span>
+                          <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {member.jabatan ? (
+                              <span class={jabatanBadge} title={`Posisi/Jabatan: ${member.jabatan}`}>
+                                {member.jabatan}
+                              </span>
+                            ) : (
+                              <span class={noJabatanBadge} title="Belum diisi di menu Pengguna">
+                                Tanpa jabatan
+                              </span>
+                            )}
+                            <span class="min-w-0 truncate text-xs text-slate-400">{member.email}</span>
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+        }
+
+        <p data-direct-user-empty hidden class="mt-3 rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center">
+          <span class="block text-sm font-medium text-slate-900">Pengguna tidak ditemukan</span>
+          <span class="mt-1 block text-xs text-slate-500">Coba nama, email, atau jabatan lain.</span>
+        </p>
+      </section>
+    </div>
+
+    <div class="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+      <p data-direct-hint class="text-xs text-slate-500 sm:mr-auto"></p>
+      <div class="flex flex-col-reverse gap-2 sm:flex-row">
+        <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+        <Button type="submit" disabled={members.length === 0}>
+          <ClipboardCheck class="size-4" />
+          Berikan
+        </Button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
+  import type { Periode } from "../../lib/activities";
+
+  const init = () => {
+    const dialog = document.getElementById("direct-dialog") as HTMLDialogElement | null;
+    const form = document.querySelector<HTMLFormElement>("[data-direct-form]");
+    if (!dialog || !form || dialog.dataset.directWired) return;
+    dialog.dataset.directWired = "1";
+
+    const errorBox = form.querySelector<HTMLElement>("[data-direct-error]");
+    const hint = form.querySelector<HTMLElement>("[data-direct-hint]");
+    const volumeBox = form.querySelector<HTMLElement>("[data-direct-volume]");
+    const search = form.querySelector<HTMLInputElement>("[data-direct-user-search]");
+    const items = [...form.querySelectorAll<HTMLElement>("[data-direct-user-item]")];
+    const allButton = form.querySelector<HTMLElement>("[data-direct-user-all]");
+    const counter = form.querySelector<HTMLElement>("[data-direct-user-count]");
+    const empty = form.querySelector<HTMLElement>("[data-direct-user-empty]");
+
+    const boxes = () => [...form.querySelectorAll<HTMLInputElement>("[data-direct-user]")];
+    const picked = () => boxes().filter((box) => box.checked);
+
+    const sync = () => {
+      const visible = items.filter((item) => !item.hidden);
+      const visibleBoxes = visible
+        .map((item) => item.querySelector<HTMLInputElement>("[data-direct-user]"))
+        .filter((box): box is HTMLInputElement => box !== null);
+      const allChecked = visibleBoxes.length > 0 && visibleBoxes.every((box) => box.checked);
+      if (allButton) allButton.textContent = allChecked ? "Kosongkan" : "Pilih semua";
+
+      if (counter) {
+        const query = search?.value.trim() ?? "";
+        counter.textContent = query
+          ? `${visible.length} dari ${items.length} pengguna`
+          : `${items.length} pengguna`;
+      }
+
+      if (hint) {
+        const count = picked().length;
+        hint.textContent =
+          count === 0 ? "Belum ada yang dipilih." : `1 aktivitas × ${count} pengguna = ${count} penugasan.`;
+      }
+
+      // Pengelompokan per level yang jadi kosong setelah difilter ikut disembunyikan.
+      form.querySelectorAll<HTMLElement>("[data-direct-group]").forEach((group) => {
+        group.hidden = ![...group.querySelectorAll<HTMLElement>("[data-direct-user-item]")].some(
+          (item) => !item.hidden,
+        );
+      });
+      if (empty) empty.hidden = visible.length > 0;
+    };
+
+    const syncVolume = () => {
+      const num = (name: string) => Number(form.querySelector<HTMLInputElement>(`[name="${name}"]`)?.value ?? 0);
+      if (volumeBox) volumeBox.textContent = String(num("direct-frequency") * num("direct-minutes") * num("direct-sdm") || 0);
+    };
+
+    form.addEventListener("input", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.matches("[data-direct-user-search]")) {
+        const query = (search?.value ?? "").trim().toLowerCase();
+        for (const item of items) {
+          item.hidden = query !== "" && !(item.dataset.search ?? "").includes(query);
+        }
+      }
+      syncVolume();
+      sync();
+    });
+
+    form.addEventListener("change", sync);
+
+    allButton?.addEventListener("click", () => {
+      const visible = items
+        .filter((item) => !item.hidden)
+        .map((item) => item.querySelector<HTMLInputElement>("[data-direct-user]"))
+        .filter((box): box is HTMLInputElement => box !== null);
+      const allChecked = visible.length > 0 && visible.every((box) => box.checked);
+      visible.forEach((box) => (box.checked = !allChecked));
+      sync();
+    });
+
+    form.querySelectorAll("[data-dialog-close]").forEach((button) =>
+      button.addEventListener("click", () => dialog.close()),
+    );
+
+    // Klik di luar panel menutup, seperti dialog lain di halaman ini.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+
+    // Bersihkan diri saat ditutup: formulir kosong lagi untuk pemakaian berikutnya.
+    dialog.addEventListener("close", () => {
+      form.reset();
+      items.forEach((item) => (item.hidden = false));
+      if (errorBox) errorBox.hidden = true;
+      if (search) search.value = "";
+      syncVolume();
+      sync();
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (errorBox) errorBox.hidden = true;
+
+      const fail = (message: string) => {
+        if (!errorBox) return;
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+      };
+
+      const name = (form.elements.namedItem("direct-name") as HTMLInputElement).value.trim();
+      const userIds = picked().map((box) => Number(box.value));
+      if (name.length < 3) return fail("Jenis aktivitas minimal 3 karakter.");
+      if (userIds.length === 0) return fail("Pilih minimal satu pengguna.");
+
+      const submit = form.querySelector<HTMLButtonElement>("[type=submit]");
+      if (submit) submit.disabled = true;
+
+      const { data, error } = await actions.createDirectAssignment({
+        name,
+        day: Number((form.elements.namedItem("direct-day") as HTMLInputElement).value || 0),
+        utama: form.querySelector<HTMLInputElement>('[name="utama"]')?.checked ?? false,
+        periodik: form.querySelector<HTMLInputElement>('[name="periodik"]')?.checked ?? false,
+        bukan_tupoksi: form.querySelector<HTMLInputElement>('[name="bukan_tupoksi"]')?.checked ?? false,
+        periode: (form.querySelector<HTMLInputElement>('[name="direct-periode"]:checked')?.value ??
+          "Bulanan") as Periode,
+        frequency: Number((form.elements.namedItem("direct-frequency") as HTMLInputElement).value || 0),
+        minutes: Number((form.elements.namedItem("direct-minutes") as HTMLInputElement).value || 0),
+        sdm: Number((form.elements.namedItem("direct-sdm") as HTMLInputElement).value || 0),
+        userIds,
+      });
+      if (submit) submit.disabled = false;
+
+      if (error) return fail(error.message ?? "Penugasan gagal disimpan.");
+
+      dialog.close();
+      await refreshPage();
+      const added = data?.added ?? 0;
+      const skipped = data?.skipped ?? 0;
+      const reused = data?.created === false ? " · aktivitas dipakai ulang" : "";
+      toast(
+        skipped > 0
+          ? `${added} penugasan langsung dibuat, ${skipped} sudah ada sebelumnya${reused}.`
+          : `${added} penugasan langsung dibuat${reused}.`,
+      );
+    });
+
+    document.querySelectorAll("[data-direct-open]").forEach((button) =>
+      button.addEventListener("click", () => {
+        dialog.showModal();
+        document.documentElement.style.overflow = "hidden";
+        sync();
+      }),
+    );
+
+    dialog.addEventListener("close", () => {
+      document.documentElement.style.overflow = "";
+    });
+
+    sync();
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

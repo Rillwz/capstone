@@ -12,7 +12,8 @@ kerja). Two roles of end users plus an admin:
 - **Admin (role 0)** — `/dashboard`: manage work units (kategori), activity types
   (jenis aktivitas), assignments (penugasan), users, and announcements (postingan).
 - **Level 1 / Level 2** — `/user`: their own task list per period, with per-occurrence
-  notes and links, plus `/user/riwayat` (history).
+  notes and links, plus `/user/riwayat` (history). Level 1 also gets `/user/penugasan`
+  ("Penugasan"), where a supervisor hands out direct assignments; level 2 does not.
 
 Stack: Astro 7 (SSR, `@astrojs/node`), Tailwind v4, `better-sqlite3`, `auth-astro`,
 `bcryptjs`, `motion` v14, `marked`. UI copy is Indonesian; code comments are English.
@@ -41,7 +42,27 @@ label, case-insensitive via `idx_positions_label`). `users.jabatan` stores the l
 itself, not a foreign key: renaming a position updates the matching accounts, deleting one
 leaves them with the text they already had. It is not part of the session token.
 
-`data/app.db` holds the owner's real data (users `admin@assignment.id`, `dosen1@…`,
+`assignments.seen_at` powers the "Pekerjaan masuk" inbox: `NULL` means the holder has not
+read it yet. The unit is the assignment, not its occurrences — a daily task must not ring
+the bell every day. The migration backfills `seen_at = created_at` for existing rows;
+without it every old assignment would show up as unread the day the feature ships.
+`idx_assignments_unseen` is a partial index (`WHERE seen_at IS NULL`) because the bell only
+ever counts those rows.
+
+`assignments.created_by` + `assignments.origin` record who handed out a **Penugasan
+Langsung** (`origin = 'langsung'`, `created_by` = that user). Rows from the catalog keep
+`created_by NULL` and `origin ''` — they are "given by the system". Authorization for
+releasing one is `created_by`-scoped: a level-1 supervisor can only undo their own, never
+the admin's.
+
+`categories` holds one system unit, `penugasan-langsung` ("Penugasan Langsung", icon
+`zap`), seeded idempotently at startup. Every direct assignment's activity lives there,
+so the catalog stays clean and the origin is easy to trace. `deleteCategory` returns
+`false` for it: `activities.category_id` has no foreign key, so deleting the unit would
+orphan its activities instead of removing them. The categories page hides it from the
+delete list and shows a "Unit sistem" badge.
+
+`data/app.db` holds the owner's real data (users `admin@assignment.id` line 1, `dosen1@…`,
 `dosen2@…`, 5 demo activities in tata-usaha with 5 assignments, 2 notes and 5 logs for
 `dosen1`, posts "1" and "2"). Never wipe it; if a test script touches it, restore the rows
 afterwards.
@@ -104,8 +125,18 @@ boundary. Input is validated with zod (`import { z } from "astro/zod"`; `astro:s
 deprecated in Astro 7).
 
 Current actions: `completeTask`, `undoTask`, `saveNote`, `assignActivities`,
-`removeActivity`, `clearAssignments`, `createUserAccount`, `deleteUserAccount`,
-`saveActivity`, `deleteActivities`, `deletePost`, `savePost`.
+`assignActivitiesToUsers` (bulk — many activities to many users, existing pairs skipped),
+`removeActivity`, `clearAssignments`, `markAssignmentsSeen` (marks the caller's own inbox —
+never takes a `userId` from the client), `createUserAccount`, `deleteUserAccount`,
+`saveActivity`, `deleteActivities`, `deletePost`, `savePost`, `createDirectAssignment`,
+`removeDirectAssignment`.
+
+The direct-assignment pair is guarded by `currentAssigner` (role 0 **or** 1, else 403), not
+`currentAdminId`. Targets are re-filtered server-side to `role !== 0`; the dialog's list is
+only a convenience. `createDirectAssignment` runs activity + assignments in one
+transaction, and reuses an existing activity of the same `name COLLATE NOCASE` + `periode`
+inside `penugasan-langsung` (`created: false`) instead of duplicating the master row.
+`removeDirectAssignment` deletes only rows whose `created_by` is the caller.
 
 `completeTask` and `undoTask` also answer with `graph`: the daily buckets of the
 year the client passes as the optional `year` input, so the contribution graph can
@@ -161,6 +192,8 @@ reappears as a missed period, and its red ring comes back).
 | `src/lib/notes.ts` | `parseNoteValues`, `parseNote`, `NOTE_MAX`, `linkLabel` |
 | `src/lib/activities.ts` | `parseActivityValues` (plain values), `parseActivity` (FormData) |
 | `src/lib/db.ts` | schema + queries, `taskStats()`, `undoOccurrence()`, `setOccurrenceNote()` |
+| `src/pages/user/penugasan.astro` | level-1 "Penugasan": direct assignments this supervisor gave, plus the dialog |
+| `src/components/admin/DirectAssignDialog.astro` | the shared "Penugasan Langsung" dialog (admin + level 1) |
 | `src/components/user/TaskCard.astro` | task row, toggle button, `data-task-toggle` / `data-state` |
 | `src/components/user/ContributionGraph.astro` | the yearly heatmap (GitHub-style) on the user page |
 | `src/components/user/NoteDialog.astro` | note + link dialog, saves through `saveNote` |
@@ -197,8 +230,40 @@ navigation keeps it, a reload wipes it.
 **Test scripts must only touch their own data.** They run against the owner's database, so
 target the rows the script created (match by name/title), never "the first row".
 
+`direct-check.mjs` covers Penugasan Langsung end to end (dialog, reuse, `created_by`
+scoping, the `penugasan-langsung` delete guard, the level-1 page and its 403s, mobile and
+themes). It logs in as the real admin (`admin@assignment.id` / `password123`) and creates
+`uji-%` accounts for the rest; it cleans both up, including any direct activities.
+
+## Penugasan Langsung (direct assignments)
+
+Two entry points, one component:
+
+- **Admin** — a "Penugasan Langsung" button on `/dashboard/assignments`, next to the bulk
+  dialog. `/dashboard/assignments` remains the only place to touch the whole catalog.
+- **Level 1** — `/user/penugasan` (nav item "Penugasan", role 1 only). Deliberately *not*
+  the admin page: this one is scoped to what the supervisor handed out themselves. Level 2
+  is redirected to `/user`; admin is redirected to `/dashboard/assignments`
+  (`requireAssigner` in `src/lib/auth.ts`).
+
+The dialog is the "Tambah Aktivitas" form of `categories/[id].astro` minus the date/unit
+choice: name, day, duration, periode, classification, frequency, SDM, computed volume, then
+the recipient list grouped by level with the same jabatan badge and search/highlight as the
+bulk dialog. The unit is never chosen — it is always `penugasan-langsung`.
+
+`shortcut:` matching for reuse ignores `day`, so two jobs with the same name and periode are
+one definition. Match `date` too if per-date variants are ever needed.
+
+Accepted risk: there is no supervisor hierarchy table, so a level 1 can assign to *any*
+level 1 or 2 — including other level 1s. Tighten when the org structure lands.
+
 ## Current state
 
 - Uncommitted: the whole motion/actions rewrite (see `git status`).
+- Done from the meeting agenda: master Posisi/Jabatan, dynamic kategori, Penugasan Massal,
+  Notifikasi Pekerjaan Masuk, Penugasan Langsung.
+- Still open: Red Notice for overdue work, Konsep Lembur (undecided), "konfirmasi selesai
+  oleh pegawai" — today a task is done the moment the employee ticks it, with no approval
+  step.
 - Known follow-up: the Riwayat page's plain-form "Batalkan" button still causes a router
   re-render that jumps the scroll to the top — it can become an action like the rest.

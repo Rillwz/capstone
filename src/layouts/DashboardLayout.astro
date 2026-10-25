@@ -3,20 +3,27 @@
 // sidebar beside the content; below lg the same list slides in from the header trigger
 // (SidebarMenu), so there is one source for the nav either way. Only the list and the
 // brand link differ per role.
-import { LayoutDashboard, LogOut, Newspaper, Tags, ClipboardCheck, RotateCcwClock, UserRound, Users } from "@lucide/astro";
+import { Bell, LayoutDashboard, LogOut, Newspaper, Tags, ClipboardCheck, RotateCcwClock, UserRound, Users } from "@lucide/astro";
 import SidebarMenu from "../components/admin/SidebarMenu.astro";
 import SidebarNav from "../components/admin/SidebarNav.astro";
 import ThemeToggle from "../components/ui/ThemeToggle.astro";
+import { countUnseenAssignments } from "../lib/db";
 import Layout from "./Layout.astro";
 
 interface Props {
   title: string;
-  user?: { name?: string | null; email?: string | null; role?: number };
+  user?: { id?: string | number; name?: string | null; email?: string | null; role?: number };
 }
 
 const { title, user } = Astro.props;
 
 const isAdmin = user?.role === 0;
+
+// Lonceng dihitung di sini, bukan lewat prop: layout ini dipakai sepuluh halaman, dan
+// satu halaman baru yang lupa mengisi prop akan diam-diam menghilangkan notifikasinya.
+const userId = Number(user?.id);
+const unseen = !isAdmin && Number.isInteger(userId) ? countUnseenAssignments(userId) : 0;
+const unseenLabel = `Pekerjaan masuk: ${unseen} belum dibaca`;
 
 const nav = isAdmin
   ? [
@@ -29,6 +36,8 @@ const nav = isAdmin
     ]
   : [
       { href: "/user", label: "Dashboard", icon: LayoutDashboard },
+      // Hanya atasan (level 1) yang boleh memberi penugasan langsung.
+      ...(user?.role === 1 ? [{ href: "/user/penugasan", label: "Penugasan", icon: ClipboardCheck }] : []),
       { href: "/user/riwayat", label: "Riwayat", icon: RotateCcwClock },
       { href: "/profile", label: "Profil", icon: UserRound },
     ];
@@ -52,6 +61,26 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
 
         <div class="ml-auto flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
+          {
+            unseen > 0 && (
+              <a
+                href="/user#pekerjaan-masuk"
+                data-bell
+                aria-label={unseenLabel}
+                title={unseenLabel}
+                class="relative grid size-9 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+              >
+                <Bell class="size-4" />
+                <span
+                  data-bell-count
+                  aria-hidden="true"
+                  class="absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-4 text-white"
+                >
+                  {unseen > 99 ? "99+" : unseen}
+                </span>
+              </a>
+            )
+          }
           <span class="hidden text-sm text-slate-500 sm:inline">{user?.name}</span>
           <a
             href="/api/auth/signout"

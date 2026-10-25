@@ -33,3 +33,15 @@ export async function requireUser(Astro: Pick<AstroGlobal, "request" | "redirect
   if (session.user?.role === 0) return Astro.redirect("/dashboard");
   return session;
 }
+
+/**
+ * Gate for /user/penugasan — the page where level 1 hands out direct assignments.
+ * Admin gets the richer admin page instead; level 2 cannot assign at all.
+ */
+export async function requireAssigner(Astro: Pick<AstroGlobal, "request" | "redirect">) {
+  const session = await requireSession(Astro);
+  if (session instanceof Response) return session;
+  if (session.user?.role === 0) return Astro.redirect("/dashboard/assignments");
+  if (session.user?.role !== 1) return Astro.redirect("/user");
+  return session;
+}

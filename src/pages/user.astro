@@ -7,21 +7,24 @@
 //
 // Semua aksi memakai Astro Action (src/actions) — menandai selesai, membatalkan, dan
 // menyimpan catatan berjalan lewat RPC, jadi halaman tidak pernah dimuat ulang.
-import { CalendarCheck, Check, CircleCheck, Inbox, TriangleAlert } from "@lucide/astro";
+import { Bell, CalendarCheck, Check, CircleCheck, Inbox, TriangleAlert } from "@lucide/astro";
 import ContributionGraph from "../components/user/ContributionGraph.astro";
 import NoteDialog from "../components/user/NoteDialog.astro";
 import TaskCard from "../components/user/TaskCard.astro";
+import Button from "../components/ui/Button.astro";
 import DashboardLayout from "../layouts/DashboardLayout.astro";
 import { requireUser } from "../lib/auth";
 import { findCategory } from "../lib/categories";
 import {
   listDailyActivity,
   listMissedTasks,
+  listNewAssignments,
   listUserOccurrences,
+  markAssignmentsSeen,
   materializeOverdue,
   taskStats,
 } from "../lib/db";
-import { formatDate, formatPeriod, formatPeriodShort } from "../lib/format";
+import { formatDate, formatDateTime, formatPeriod, formatPeriodShort } from "../lib/format";
 import { daysBetween, todayIso } from "../lib/tasks";
 
 const session = await requireUser(Astro);
@@ -32,10 +35,20 @@ if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequir
 
 const today = todayIso();
 
+// "Sudah dibaca" tanpa JavaScript: form biasa ke halaman ini sendiri.
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  if (form.get("action") === "seen") {
+    markAssignmentsSeen(userId);
+    return Astro.redirect("/user#pekerjaan-masuk");
+  }
+}
+
 // Catat dulu periode yang lewat tanpa penyelesaian, baru baca kemunculan periode berjalan.
 materializeOverdue(userId);
 const occurrences = listUserOccurrences(userId);
 const missed = listMissedTasks(userId);
+const newAssignments = listNewAssignments(userId);
 
 const groups = [
   { id: "hari-ini", title: "Hari ini", items: occurrences.filter((item) => item.due === today) },
@@ -140,6 +153,84 @@ const dueText = (due: string) => {
     role="alert"
   >
   </p>
+
+  {/* Pekerjaan masuk: penugasan yang belum dibaca. Satuannya penugasan, bukan
+      kemunculan — tugas harian tidak boleh membunyikan lonceng setiap hari. */}
+  {
+    newAssignments.length > 0 && (
+      <section
+        id="pekerjaan-masuk"
+        data-inbox
+        class="mt-6 rounded-xl border border-brand-200 bg-brand-50"
+        aria-labelledby="pekerjaan-masuk-title"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-4 sm:px-5">
+          <div class="flex items-start gap-3">
+            <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700">
+              <Bell class="size-4" />
+            </span>
+            <div class="min-w-0">
+              <h2 id="pekerjaan-masuk-title" class="text-sm font-semibold text-slate-900">
+                Pekerjaan masuk
+              </h2>
+              <p class="mt-0.5 text-xs text-slate-600">
+                {newAssignments.length} penugasan baru untuk Anda. Buka daftarnya, lalu tandai
+                sudah dibaca.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              data-inbox-toggle
+              aria-expanded="false"
+              aria-controls="pekerjaan-masuk-list"
+              class="text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+            >
+              Lihat daftar
+            </button>
+            {/* Fallback tanpa JavaScript: form biasa ke halaman ini sendiri. */}
+            <form method="POST">
+              <input type="hidden" name="action" value="seen" />
+              <Button type="submit" size="sm" data-inbox-seen>
+                <Check class="size-4" />
+                Sudah dibaca
+              </Button>
+            </form>
+          </div>
+        </div>
+
+        <ul
+          id="pekerjaan-masuk-list"
+          data-inbox-list
+          hidden
+          class="divide-y divide-brand-100 border-t border-brand-100 px-4 sm:px-5"
+        >
+          {newAssignments.map((item) => {
+            const category = findCategory(item.category_id);
+            const UnitIcon = category?.icon ?? Inbox;
+            return (
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
+                {/* Di layar sempit nama aktivitas mengambil satu baris penuh, chip &
+                    unit/tanggal turun ke baris berikutnya. */}
+                <span class="flex w-full min-w-0 items-center gap-2 text-sm text-slate-900 sm:w-auto sm:flex-1">
+                  <UnitIcon class="size-4 shrink-0 text-slate-400" />
+                  <span class="truncate">{item.name}</span>
+                </span>
+                <span class="rounded-full bg-white px-2 py-0.5 text-xs text-slate-600">
+                  {item.periode}
+                </span>
+                <span class="min-w-0 truncate text-xs text-slate-500">
+                  {category?.label ?? item.category_id} · {formatDateTime(item.created_at)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    )
+  }
 
   {
     occurrences.length > 0 && (
@@ -314,6 +405,48 @@ const dueText = (due: string) => {
 
   document.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+
+    // Buka/tutup daftar pekerjaan masuk. Elemennya dicari saat dipakai karena router
+    // menukar DOM; seksi ini hilang dari halaman begitu ditandai sudah dibaca.
+    const inboxToggle = target.closest<HTMLElement>("[data-inbox-toggle]");
+    if (inboxToggle) {
+      const section = inboxToggle.closest<HTMLElement>("[data-inbox]");
+      const list = section?.querySelector<HTMLElement>("[data-inbox-list]");
+      if (!list) return;
+      const open = list.hidden;
+      list.hidden = !open;
+      inboxToggle.setAttribute("aria-expanded", String(open));
+      inboxToggle.textContent = open ? "Sembunyikan" : "Lihat daftar";
+      return;
+    }
+
+    // Tandai "pekerjaan masuk" sudah dibaca tanpa memuat ulang halaman.
+    const inboxSeen = target.closest<HTMLElement>("[data-inbox-seen]");
+    if (inboxSeen) {
+      event.preventDefault();
+      clearError();
+
+      const { error } = await actions.markAssignmentsSeen({});
+      if (error) {
+        showError(error.message || "Gagal menandai pekerjaan masuk.");
+        return;
+      }
+
+      // Kartu ditutup di tempat; lonceng di header ikut hilang.
+      const section = inboxSeen.closest<HTMLElement>("[data-inbox]");
+      if (section) {
+        section.style.overflow = "hidden";
+        section.style.maxHeight = `${section.offsetHeight}px`;
+        requestAnimationFrame(() => {
+          section.style.transition = "max-height 0.3s ease, opacity 0.3s ease";
+          section.style.maxHeight = "0px";
+          section.style.opacity = "0";
+        });
+        setTimeout(() => section.remove(), 320);
+      }
+      document.querySelector("[data-bell]")?.remove();
+      return;
+    }
 
     // Tandai selesai / batalkan dari kartu tugas.
     const toggle = target.closest<HTMLElement>("[data-task-toggle]");

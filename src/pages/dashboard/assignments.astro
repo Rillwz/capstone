@@ -6,8 +6,20 @@
 //
 // Aksinya memakai Astro Action (src/actions) — assigning, melepas, dan mengosongkan
 // penugasan tidak memuat ulang halaman.
-import { ClipboardCheck, ClipboardX, Plus, Search, Trash, TriangleAlert, UserRound, X } from "@lucide/astro";
+import {
+  ClipboardCheck,
+  ClipboardX,
+  Plus,
+  Search,
+  Trash,
+  TriangleAlert,
+  UserRound,
+  Users,
+  X,
+  Zap,
+} from "@lucide/astro";
 import Button from "../../components/ui/Button.astro";
+import DirectAssignDialog from "../../components/admin/DirectAssignDialog.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
 import { listCategories } from "../../lib/categories";
@@ -33,6 +45,11 @@ const selected = members.find((user) => user.id === selectedId);
 const catalog = selectedId ? listActivityCatalog(selectedId) : [];
 const assignedIds = new Set(catalog.filter((activity) => activity.assigned).map((activity) => activity.id));
 
+// Katalog tanpa filter "sudah ditugaskan" — dipakai dialog massal, di sana yang
+// menentukan adalah pasangan orang × aktivitas, bukan satu orang. id 0 = tidak ada
+// pengguna, jadi flag `assigned` selalu 0.
+const fullCatalog = listActivityCatalog(0);
+
 // Group the user's activities by unit, keeping the catalog's unit order.
 const assignedActivities = selectedId ? listAssignedActivitiesForUser(selectedId) : [];
 const byUnit = categories
@@ -48,14 +65,34 @@ const unitsWithActivities = categories.filter((category) =>
 );
 // Nothing left to hand out: every activity already belongs to this user.
 const canAssign = catalog.some((activity) => !activity.assigned);
+
+// Posisi/Jabatan tampil sebagai badge di daftar pengguna. Yang kosong tetap diberi
+// penanda supaya barisnya tidak terlihat "bolong" — bukan cuma hilang begitu saja.
+// inline-block (bukan inline-flex) supaya `truncate` benar-benar memberi elipsis.
+const jabatanBadge =
+  "inline-block max-w-full truncate rounded-md bg-slate-100 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-4 text-slate-600";
+const noJabatanBadge =
+  "inline-block max-w-full truncate rounded-md border border-dashed border-slate-200 px-1.5 py-0.5 align-middle text-[11px] leading-4 text-slate-400";
 ---
 
 <DashboardLayout title="Penugasan" user={session.user}>
-  <div>
-    <h1 class="text-xl font-semibold text-slate-900">Penugasan</h1>
-    <p class="mt-1 text-sm text-slate-500">
-      Tetapkan jenis aktivitas unit kerja yang menjadi tanggung jawab tiap pengguna.
-    </p>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Penugasan</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Tetapkan jenis aktivitas unit kerja yang menjadi tanggung jawab tiap pengguna.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <Button type="button" variant="outline" data-direct-open disabled={members.length === 0}>
+        <Zap class="size-4" />
+        Penugasan Langsung
+      </Button>
+      <Button type="button" variant="outline" data-bulk-open disabled={members.length === 0}>
+        <Users class="size-4" />
+        Penugasan Massal
+      </Button>
+    </div>
   </div>
 
   <div class="mt-6 grid items-start gap-6 lg:grid-cols-[19rem_1fr]">
@@ -75,7 +112,7 @@ const canAssign = catalog.some((activity) => !activity.assigned);
             id="user-search"
             type="search"
             data-user-search
-            placeholder="Cari nama atau email"
+            placeholder="Cari nama, email, atau jabatan"
             autocomplete="off"
             enterkeyhint="search"
             class="h-9 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600 [&::-webkit-search-cancel-button]:appearance-none"
@@ -105,7 +142,11 @@ const canAssign = catalog.some((activity) => !activity.assigned);
             const row = counts.get(member.id);
             const active = member.id === selectedId;
             return (
-              <li data-user-item data-reveal="fade" data-search={`${member.name} ${member.email}`.toLowerCase()}>
+              <li
+                data-user-item
+                data-reveal="fade"
+                data-search={`${member.name} ${member.email} ${member.jabatan}`.toLowerCase()}
+              >
                 <a
                   href={`/dashboard/assignments?user=${member.id}`}
                   aria-current={active ? "true" : undefined}
@@ -132,10 +173,23 @@ const canAssign = catalog.some((activity) => !activity.assigned);
                     <span data-user-email class="mt-0.5 block truncate text-xs text-slate-400">
                       {member.email}
                     </span>
-                    <span class="mt-0.5 block truncate text-xs text-slate-500">
-                      {row
-                        ? `${row.activity_count} aktivitas · ${row.unit_count} unit`
-                        : "Belum ada penugasan"}
+                    <span class="mt-1.5 flex items-center justify-between gap-2">
+                      {member.jabatan ? (
+                        <span
+                          data-user-jabatan
+                          class:list={[jabatanBadge, "min-w-0"]}
+                          title={`Posisi/Jabatan: ${member.jabatan}`}
+                        >
+                          {member.jabatan}
+                        </span>
+                      ) : (
+                        <span class={noJabatanBadge} title="Belum diisi di menu Pengguna">
+                          Tanpa jabatan
+                        </span>
+                      )}
+                      <span class="shrink-0 text-xs text-slate-500">
+                        {row ? `${row.activity_count} aktivitas · ${row.unit_count} unit` : "Belum ada penugasan"}
+                      </span>
                     </span>
                   </span>
                 </a>
@@ -181,8 +235,19 @@ const canAssign = catalog.some((activity) => !activity.assigned);
           <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <header class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center">
               <div class="min-w-0 flex-1">
-                <h2 class="truncate text-base font-semibold text-slate-900">{selected.name}</h2>
-                <p class="text-xs text-slate-500">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <h2 class="truncate text-base font-semibold text-slate-900">{selected.name}</h2>
+                  {selected.jabatan ? (
+                    <span class={jabatanBadge} title={`Posisi/Jabatan: ${selected.jabatan}`}>
+                      {selected.jabatan}
+                    </span>
+                  ) : (
+                    <span class={noJabatanBadge} title="Belum diisi di menu Pengguna">
+                      Tanpa jabatan
+                    </span>
+                  )}
+                </div>
+                <p class="mt-0.5 text-xs text-slate-500">
                   {selected.email}
                   {totalActivities > 0
                     ? ` · ${totalActivities} aktivitas di ${byUnit.length} unit kerja`
@@ -374,6 +439,190 @@ const canAssign = catalog.some((activity) => !activity.assigned);
     </form>
   </dialog>
 
+  <!-- Penugasan massal: pilih pekerjaan dulu, lalu pilih banyak orang sekaligus.
+       Kebalikan dari alur per-user di atas; yang sudah terpasang dilewati, tidak gagal. -->
+  <dialog id="bulk-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-2xl" aria-labelledby="bulk-title">
+    <form method="POST" data-bulk-form>
+      <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
+        <div>
+          <h2 id="bulk-title" class="text-base font-semibold text-slate-900">Tambah Penugasan Massal</h2>
+          <p class="mt-0.5 text-xs text-slate-500">
+            Pilih jenis aktivitas, lalu centang pengguna yang akan memegangnya.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-dialog-close
+          aria-label="Tutup"
+          class="grid size-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          <X class="size-4" />
+        </button>
+      </div>
+
+      <p data-bulk-error hidden class="mx-5 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 sm:mx-6" role="alert"></p>
+
+      <div class="mt-4 max-h-[58vh] overflow-y-auto border-y border-slate-200">
+        <!-- Langkah 1: pekerjaan -->
+        <section class="px-5 py-4 sm:px-6">
+          <div class="flex items-center justify-between gap-2">
+            <label for="bulk-unit" class="text-sm font-medium text-slate-900">1. Jenis aktivitas</label>
+            <button
+              type="button"
+              data-bulk-activity-all
+              disabled={unitsWithActivities.length === 0}
+              class="text-xs font-medium text-brand-600 transition-colors hover:text-brand-700 disabled:text-slate-400 focus-visible:outline-2 focus-visible:outline-brand-600"
+            >
+              Centang semua unit ini
+            </button>
+          </div>
+
+          {
+            unitsWithActivities.length === 0 ? (
+              <p class="mt-2 rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-slate-500">
+                Belum ada jenis aktivitas. Tambahkan dulu lewat menu Kategori.
+              </p>
+            ) : (
+              <>
+                <select
+                  id="bulk-unit"
+                  data-bulk-unit
+                  class="mt-2 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+                >
+                  {unitsWithActivities.map((category, index) => (
+                    <option value={category.id} selected={index === 0}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+
+                <div class="mt-2">
+                  {unitsWithActivities.map((category, index) => (
+                    <fieldset data-bulk-panel={category.id} hidden={index > 0}>
+                      <legend class="sr-only">{category.label}</legend>
+                      <div class="grid gap-1.5 sm:grid-cols-2">
+                        {fullCatalog
+                          .filter((activity) => activity.category_id === category.id)
+                          .map((activity) => (
+                            <label class="flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors hover:bg-slate-50 has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50">
+                              <input
+                                type="checkbox"
+                                name="bulkActivityIds"
+                                value={activity.id}
+                                data-bulk-activity={category.id}
+                                class="mt-0.5 size-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                              />
+                              <span class="min-w-0">
+                                <span class="block">{activity.name}</span>
+                                <span class="block text-xs text-slate-400">{activity.periode}</span>
+                              </span>
+                            </label>
+                          ))}
+                      </div>
+                    </fieldset>
+                  ))}
+                </div>
+              </>
+            )
+          }
+        </section>
+
+        <!-- Langkah 2: orangnya -->
+        <section class="border-t border-slate-200 px-5 py-4 sm:px-6">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="text-sm font-medium text-slate-900">2. Pengguna</p>
+              <p data-bulk-user-count class="text-xs text-slate-500">
+                {members.length} pengguna level 1 &amp; 2
+              </p>
+            </div>
+            <button
+              type="button"
+              data-bulk-user-all
+              class="text-xs font-medium text-brand-600 transition-colors hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-brand-600"
+            >
+              Pilih semua
+            </button>
+          </div>
+
+          <div class="relative mt-2">
+            <Search class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
+            <label for="bulk-user-search" class="sr-only">Cari pengguna</label>
+            <input
+              id="bulk-user-search"
+              type="search"
+              data-bulk-user-search
+              autocomplete="off"
+              placeholder="Cari nama, email, atau jabatan"
+              class="h-9 w-full rounded-lg border border-slate-300 bg-white pr-3 pl-9 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-brand-600 [&::-webkit-search-cancel-button]:appearance-none"
+            />
+          </div>
+
+          <ul class="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {members.map((member) => {
+              const row = counts.get(member.id);
+              return (
+                <li
+                  data-bulk-user-item
+                  data-search={`${member.name} ${member.email} ${member.jabatan}`.toLowerCase()}
+                >
+                  <label class="flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-slate-50 has-[:checked]:bg-brand-50 max-sm:items-start">
+                    <input
+                      type="checkbox"
+                      name="bulkUserIds"
+                      value={member.id}
+                      data-bulk-user
+                      class="size-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-600 max-sm:mt-0.5"
+                    />
+                    <span class="min-w-0 flex-1">
+                      <span class="flex items-start justify-between gap-2">
+                        <span class="min-w-0 truncate text-sm text-slate-900">{member.name}</span>
+                        {/* Di layar sempit hitungannya ikut baris nama — kolom kanan tidak muat. */}
+                        <span class="shrink-0 text-xs text-slate-500 sm:hidden">
+                          {row ? `${row.activity_count} aktivitas` : "Belum ada"}
+                        </span>
+                      </span>
+                      <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {member.jabatan ? (
+                          <span class={jabatanBadge} title={`Posisi/Jabatan: ${member.jabatan}`}>
+                            {member.jabatan}
+                          </span>
+                        ) : (
+                          <span class={noJabatanBadge} title="Belum diisi di menu Pengguna">
+                            Tanpa jabatan
+                          </span>
+                        )}
+                        <span class="min-w-0 truncate text-xs text-slate-400">{member.email}</span>
+                      </span>
+                    </span>
+                    <span class="hidden shrink-0 text-xs text-slate-500 sm:block">
+                      {row ? `${row.activity_count} aktivitas` : "Belum ada"}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+            <li data-bulk-user-empty hidden class="px-3 py-6 text-center">
+              <p class="text-sm font-medium text-slate-900">Pengguna tidak ditemukan</p>
+              <p class="mt-1 text-xs text-slate-500">Coba nama atau email lain.</p>
+            </li>
+          </ul>
+        </section>
+      </div>
+
+      <div class="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+        <p data-bulk-hint class="text-xs text-slate-500 sm:mr-auto"></p>
+        <div class="flex flex-col-reverse gap-2 sm:flex-row">
+          <Button variant="outline" type="button" data-dialog-close>Batal</Button>
+          <Button type="submit" disabled={members.length === 0}>
+            <ClipboardCheck class="size-4" />
+            Simpan
+          </Button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="clear-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-md" aria-labelledby="clear-title">
     {/* Wadah field — submit-nyahandled oleh Astro Action. */}
     <form method="POST" data-clear-form data-user-id={selected?.id ?? 0}>
@@ -403,6 +652,8 @@ const canAssign = catalog.some((activity) => !activity.assigned);
       </div>
     </form>
   </dialog>
+
+  <DirectAssignDialog members={members} />
 </DashboardLayout>
 
 <script>
@@ -417,6 +668,7 @@ const canAssign = catalog.some((activity) => !activity.assigned);
     document.body.dataset.assignWired = "1";
 
     const assignDialog = document.getElementById("assign-dialog") as HTMLDialogElement | null;
+    const bulkDialog = document.getElementById("bulk-dialog") as HTMLDialogElement | null;
     const clearDialog = document.getElementById("clear-dialog") as HTMLDialogElement | null;
 
     const open = (dialog: HTMLDialogElement | null) => {
@@ -425,7 +677,7 @@ const canAssign = catalog.some((activity) => !activity.assigned);
       document.documentElement.style.overflow = "hidden";
     };
 
-    [assignDialog, clearDialog].forEach((dialog) => {
+    [assignDialog, bulkDialog, clearDialog].forEach((dialog) => {
       if (!dialog || dialog.dataset.assignWired) return;
       dialog.dataset.assignWired = "1";
 
@@ -442,6 +694,7 @@ const canAssign = catalog.some((activity) => !activity.assigned);
     });
 
     document.querySelector("[data-assign-open]")?.addEventListener("click", () => open(assignDialog));
+    document.querySelector("[data-bulk-open]")?.addEventListener("click", () => open(bulkDialog));
     document.querySelector("[data-clear-open]")?.addEventListener("click", () => open(clearDialog));
 
     // Unit dropdown filters the catalog panels; the submit hint follows the selections.
@@ -495,6 +748,146 @@ const canAssign = catalog.some((activity) => !activity.assigned);
       await refreshPage();
       toast(
         data?.added === 1 ? "Aktivitas ditugaskan." : `${data?.added ?? 0} aktivitas ditugaskan.`,
+      );
+    });
+
+    // Penugasan massal: pekerjaan dulu, lalu orangnya. Hitungan di footer ikut
+    // berubah setiap centang; yang sudah terpasang dilewati oleh server.
+    const bulkForm = document.querySelector<HTMLFormElement>("[data-bulk-form]");
+    const bulkUnit = document.querySelector<HTMLSelectElement>("[data-bulk-unit]");
+    const bulkHint = document.querySelector<HTMLElement>("[data-bulk-hint]");
+    const bulkError = document.querySelector<HTMLElement>("[data-bulk-error]");
+    const bulkUserSearch = document.querySelector<HTMLInputElement>("[data-bulk-user-search]");
+    const bulkUserItems = [...document.querySelectorAll<HTMLElement>("[data-bulk-user-item]")];
+
+    const bulkPicked = (name: "bulkActivityIds" | "bulkUserIds") => [
+      ...(bulkForm?.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`) ?? []),
+    ];
+
+    const syncBulk = () => {
+      const unit = bulkUnit?.value;
+      document.querySelectorAll<HTMLElement>("[data-bulk-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.bulkPanel !== unit;
+      });
+
+      // Tombol "centang semua" berubah jadi "Kosongkan" saat semua yang terlihat
+      // sudah dicentang — supaya jelas klik berikutnya mengosongkan, bukan menambah.
+      const allButton = document.querySelector<HTMLElement>("[data-bulk-user-all]");
+      if (allButton) {
+        const visibleBoxes = bulkUserItems
+          .filter((item) => !item.hidden)
+          .map((item) => item.querySelector<HTMLInputElement>("[data-bulk-user]"))
+          .filter((box): box is HTMLInputElement => box !== null);
+        const allChecked = visibleBoxes.length > 0 && visibleBoxes.every((box) => box.checked);
+        allButton.textContent = allChecked ? "Kosongkan" : "Pilih semua";
+      }
+
+      const activityButton = document.querySelector<HTMLElement>("[data-bulk-activity-all]");
+      if (activityButton) {
+        const unitBoxes = [...document.querySelectorAll<HTMLInputElement>("[data-bulk-activity]")].filter(
+          (box) => box.dataset.bulkActivity === unit,
+        );
+        const allChecked = unitBoxes.length > 0 && unitBoxes.every((box) => box.checked);
+        activityButton.textContent = allChecked ? "Kosongkan unit ini" : "Centang semua unit ini";
+      }
+
+      const activities = bulkPicked("bulkActivityIds").length;
+      const users = bulkPicked("bulkUserIds").length;
+      if (bulkHint) {
+        if (activities === 0 && users === 0) bulkHint.textContent = "Belum ada yang dipilih.";
+        else if (activities === 0) bulkHint.textContent = "Pilih minimal satu jenis aktivitas.";
+        else if (users === 0) bulkHint.textContent = "Pilih minimal satu pengguna.";
+        else bulkHint.textContent = `${activities} aktivitas × ${users} pengguna = ${activities * users} penugasan.`;
+      }
+    };
+
+    // Tombol "centang semua" bekerja pada yang terlihat: unit yang sedang dibuka /
+    // pengguna yang lolos pencarian. Klik kedua mengosongkan lagi.
+    const toggleAll = (boxes: HTMLInputElement[]) => {
+      const target = !boxes.every((box) => box.checked);
+      boxes.forEach((box) => (box.checked = target));
+      syncBulk();
+    };
+
+    document.querySelector("[data-bulk-activity-all]")?.addEventListener("click", () => {
+      const inUnit = [...document.querySelectorAll<HTMLInputElement>("[data-bulk-activity]")].filter(
+        (box) => box.dataset.bulkActivity === bulkUnit?.value,
+      );
+      toggleAll(inUnit);
+    });
+
+    document.querySelector("[data-bulk-user-all]")?.addEventListener("click", () => {
+      toggleAll(
+        bulkUserItems
+          .filter((item) => !item.hidden)
+          .map((item) => item.querySelector<HTMLInputElement>("[data-bulk-user]"))
+          .filter((box): box is HTMLInputElement => box !== null),
+      );
+    });
+
+    bulkUserSearch?.addEventListener("input", () => {
+      const query = bulkUserSearch.value.trim().toLowerCase();
+      for (const item of bulkUserItems) {
+        item.hidden = query !== "" && !(item.dataset.search ?? "").includes(query);
+      }
+      const empty = document.querySelector<HTMLElement>("[data-bulk-user-empty]");
+      const visible = bulkUserItems.filter((item) => !item.hidden).length;
+      if (empty) empty.hidden = visible > 0;
+      const counter = document.querySelector<HTMLElement>("[data-bulk-user-count]");
+      if (counter) {
+        counter.textContent = query
+          ? `${visible} dari ${bulkUserItems.length} pengguna`
+          : `${bulkUserItems.length} pengguna level 1 & 2`;
+      }
+    });
+
+    bulkUnit?.addEventListener("change", syncBulk);
+    bulkForm?.addEventListener("change", syncBulk);
+    syncBulk();
+
+    // Dialog ditutup (Batal / Esc / simpan) → bersihkan pilihan, pencarian, dan error,
+    // supaya buka berikutnya mulai dari nol.
+    bulkDialog?.addEventListener("close", () => {
+      bulkForm?.reset();
+      if (bulkUserSearch) bulkUserSearch.value = "";
+      bulkUserItems.forEach((item) => (item.hidden = false));
+      const empty = document.querySelector<HTMLElement>("[data-bulk-user-empty]");
+      if (empty) empty.hidden = true;
+      const counter = document.querySelector<HTMLElement>("[data-bulk-user-count]");
+      if (counter) counter.textContent = `${bulkUserItems.length} pengguna level 1 & 2`;
+      if (bulkError) bulkError.hidden = true;
+      syncBulk();
+    });
+
+    bulkForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const activityIds = bulkPicked("bulkActivityIds").map((box) => Number(box.value));
+      const userIds = bulkPicked("bulkUserIds").map((box) => Number(box.value));
+
+      const fail = (message: string) => {
+        if (!bulkError) return;
+        bulkError.textContent = message;
+        bulkError.hidden = false;
+      };
+      if (activityIds.length === 0) return fail("Pilih minimal satu jenis aktivitas.");
+      if (userIds.length === 0) return fail("Pilih minimal satu pengguna.");
+      if (bulkError) bulkError.hidden = true;
+
+      const submit = bulkForm.querySelector<HTMLButtonElement>("[type=submit]");
+      if (submit) submit.disabled = true;
+      const { data, error } = await actions.assignActivitiesToUsers({ userIds, activityIds });
+      if (submit) submit.disabled = false;
+
+      if (error) return fail(error.message ?? "Penugasan gagal disimpan.");
+
+      bulkDialog?.close();
+      await refreshPage();
+      const added = data?.added ?? 0;
+      const skipped = data?.skipped ?? 0;
+      toast(
+        skipped > 0
+          ? `${added} penugasan baru, ${skipped} sudah ada sebelumnya.`
+          : `${added} penugasan ditambahkan.`,
       );
     });
 
@@ -585,6 +978,7 @@ const canAssign = catalog.some((activity) => !activity.assigned);
         // Hidden rows are reset too, so no stale highlight is left behind.
         highlight(item.querySelector<HTMLElement>("[data-user-name]"), match ? query : "");
         highlight(item.querySelector<HTMLElement>("[data-user-email]"), match ? query : "");
+        highlight(item.querySelector<HTMLElement>("[data-user-jabatan]"), match ? query : "");
         if (match) visible++;
       }
 

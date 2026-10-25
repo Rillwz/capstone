@@ -1,0 +1,147 @@
+---
+// Penugasan — area level 1 (atasan). Di sini atasan memberi pekerjaan langsung ke
+// pegawai, dan hanya melihat/mengoreksi apa yang ia sendiri berikan.
+//
+// Sengaja bukan /dashboard/assignments: halaman itu memperlihatkan seluruh katalog dan
+// membolehkan melepas penugasan siapa pun. Ini halaman sempit dengan satu wewenang.
+import { ClipboardList, Inbox, Trash, UserRound, Zap } from "@lucide/astro";
+import DirectAssignDialog from "../../components/admin/DirectAssignDialog.astro";
+import Button from "../../components/ui/Button.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireAssigner } from "../../lib/auth";
+import { findCategory } from "../../lib/categories";
+import { deleteDirectAssignment, listDirectAssignmentsBy, listUsers } from "../../lib/db";
+import { formatDateTime } from "../../lib/format";
+
+const session = await requireAssigner(Astro);
+if (session instanceof Response) return session;
+
+const userId = Number(session.user!.id);
+if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequired");
+
+// Koreksi tanpa JavaScript: form biasa ke halaman ini sendiri.
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  if (form.get("action") === "remove") {
+    const removed = deleteDirectAssignment(Number(form.get("id") ?? 0), userId);
+    return Astro.redirect(removed ? "/user/penugasan?removed=1" : "/user/penugasan?denied=1");
+  }
+}
+
+// Penerima: level 1 & 2 saja — admin tidak memegang penugasan, dan menugaskan ke
+// diri sendiri bukan hal yang masuk akal di layar ini.
+const members = listUsers()
+  .filter((user) => user.role !== 0 && user.id !== userId)
+  .map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, jabatan: user.jabatan }));
+
+const given = listDirectAssignmentsBy(userId);
+const directCategory = findCategory("penugasan-langsung");
+const UnitIcon = directCategory?.icon ?? ClipboardList;
+const removed = Astro.url.searchParams.has("removed");
+const denied = Astro.url.searchParams.has("denied");
+const firstName = (session.user?.name ?? "Pengguna").split(" ")[0];
+---
+
+<DashboardLayout title="Penugasan" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Penugasan</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Berikan pekerjaan langsung ke pegawai. Halo, {firstName}.
+      </p>
+    </div>
+    <Button type="button" data-direct-open disabled={members.length === 0}>
+      <Zap class="size-4" />
+      Penugasan Langsung
+    </Button>
+  </div>
+
+  {
+    removed && (
+      <p
+        data-notice
+        data-notice-params="removed"
+        class="notice mt-6 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+        role="status"
+      >
+        Penugasan dilepas.
+      </p>
+    )
+  }
+  {
+    denied && (
+      <p
+        data-notice
+        data-notice-params="denied"
+        class="notice mt-6 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
+        role="alert"
+      >
+        Penugasan itu bukan milik Anda atau sudah dilepas.
+      </p>
+    )
+  }
+
+  <section class="mt-6 rounded-xl border border-slate-200 bg-white" data-reveal="up">
+    <header class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4">
+      <div>
+        <h2 class="text-sm font-semibold text-slate-900">Yang Anda berikan</h2>
+        <p class="mt-0.5 text-xs text-slate-500">
+          {given.length} penugasan langsung aktif.
+        </p>
+      </div>
+      <p class="text-xs text-slate-500">Penerima dapat melihatnya di beranda masing-masing.</p>
+    </header>
+
+    {
+      given.length === 0 ? (
+        <div class="flex flex-col items-center gap-2 px-6 py-14 text-center">
+          <Inbox class="size-8 text-slate-300" />
+          <p class="text-sm font-medium text-slate-900">Belum ada penugasan langsung</p>
+          <p class="max-w-sm text-sm text-slate-500">
+            Gunakan tombol "Penugasan Langsung" untuk membuat pekerjaan dan menunjuk pengerjanya.
+          </p>
+        </div>
+      ) : (
+        <ul class="divide-y divide-slate-100">
+          {given.map((row) => {
+            return (
+              <li class="flex flex-wrap items-start gap-3 px-5 py-3.5" data-reveal="fade">
+                <span class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-600">
+                  <UnitIcon class="size-4" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-medium text-slate-900">{row.name}</p>
+                  <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{row.periode}</span>
+                    <span class="inline-flex items-center gap-1">
+                      <UserRound class="size-3.5" />
+                      {row.user_name}
+                    </span>
+                  </p>
+                  <p class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
+                    {row.jabatan && <span>{row.jabatan}</span>}
+                    <span>{formatDateTime(row.created_at)}</span>
+                  </p>
+                </div>
+                <form method="POST">
+                  <input type="hidden" name="action" value="remove" />
+                  <input type="hidden" name="id" value={row.id} />
+                  <button
+                    type="submit"
+                    class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                    title={`Lepas penugasan dari ${row.user_name}`}
+                  >
+                    <Trash class="size-3.5" />
+                    Lepas
+                  </button>
+                </form>
+              </li>
+            );
+          })}
+        </ul>
+      )
+    }
+  </section>
+
+  <DirectAssignDialog members={members} />
+</DashboardLayout>
