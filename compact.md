@@ -302,7 +302,7 @@ Jakarta day in JS) and the latest logins/posts.
 | `src/lib/activities.ts` | `parseActivityValues` (plain values), `parseActivity` (FormData) |
 | `src/lib/db.ts` | schema + queries, `taskStats()`, `undoOccurrence()`, `setOccurrenceNote()` |
 | `src/pages/user/penugasan.astro` | level-1 "Penugasan": direct assignments this supervisor gave, plus the dialog |
-| `src/pages/instruksi.astro` | admin tracker: every direct assignment the admin gave, with progress |
+| `src/pages/instruksi.astro` | admin "Instruksi": gives direct assignments (dialog lives here) and tracks their progress |
 | `src/components/GivenAssignments.astro` | shared tracker panel (summary counts, `?belum=1` filter, per-assignment cards) |
 | `src/components/user/TaskTimeline.astro` | per-period strip: selesai / terlewat / berjalan, ≤12 nodes |
 | `src/components/admin/DirectAssignDialog.astro` | the shared "Instruksi" dialog (admin + level 1) |
@@ -365,8 +365,9 @@ and a real no-JS release.
 
 Two entry points, one component:
 
-- **Admin** — an "Instruksi" button on `/dashboard/assignments`, next to the bulk
-  dialog. `/dashboard/assignments` remains the only place to touch the whole catalog.
+- **Admin** — `/instruksi` (nav item "Instruksi") holds both the dialog and the tracker.
+  `/dashboard/assignments` remains the only place to touch the whole catalog, and no longer
+  carries the dialog.
 - **Level 1** — `/user/penugasan` (nav item "Instruksi", role 1 only). Deliberately *not*
   the admin page: this one is scoped to what the supervisor handed out themselves. Level 2
   is redirected to `/user`; admin is redirected to `/dashboard/assignments`

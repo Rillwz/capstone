@@ -1,17 +1,18 @@
 ---
-// Instruksi — sisi admin. Semua instruksi yang diberikan admin,
-// dengan progres per periode.
+// Instruksi — sisi admin. Memberi instruksi baru dan memantau progres per periode.
 //
 // Terpisah dari /dashboard/assignments (katalog & per-user) karena pertanyaannya beda:
 // di sana "siapa memegang apa", di sini "pekerjaan yang saya berikan sudah jalan atau
-// belum". Penugasan massal dari katalog tidak masuk sini — origin-nya bukan 'langsung'.
-import { ArrowLeft, Bolt } from "../lib/icons";
+// belum". Karena itu dialog "Beri instruksi" tinggal di halaman ini, bukan di sana.
+// Penugasan massal dari katalog tidak masuk sini — origin-nya bukan 'langsung'.
+import { Bolt } from "../lib/icons";
+import DirectAssignDialog from "../components/admin/DirectAssignDialog.astro";
 import GivenAssignments from "../components/GivenAssignments.astro";
 import Button from "../components/ui/Button.astro";
 import ToastFlash from "../components/ui/ToastFlash.astro";
 import DashboardLayout from "../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../lib/auth";
-import { deleteDirectAssignment, listGivenAssignments } from "../lib/db";
+import { deleteDirectAssignment, listGivenAssignments, listUsers } from "../lib/db";
 
 const session = await requireAdmin(Astro);
 if (session instanceof Response) return session;
@@ -28,6 +29,11 @@ if (Astro.request.method === "POST") {
   }
 }
 
+// Penerima dialog: level 1 & 2. Admin tidak memegang penugasan, jadi tidak ikut.
+const members = listUsers()
+  .filter((user) => user.role !== 0)
+  .map((user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, jabatan: user.jabatan }));
+
 const onlyUnfinished = Astro.url.searchParams.has("belum");
 const given = listGivenAssignments(userId, onlyUnfinished);
 const removed = Astro.url.searchParams.has("removed");
@@ -42,7 +48,7 @@ const denied = Astro.url.searchParams.has("denied");
         Pantau progres pekerjaan yang Anda berikan langsung ke pegawai.
       </p>
     </div>
-    <Button href="/dashboard/assignments">
+    <Button type="button" data-direct-open disabled={members.length === 0}>
       <Bolt class="size-4" />
       Beri instruksi
     </Button>
@@ -69,11 +75,5 @@ const denied = Astro.url.searchParams.has("denied");
     />
   </div>
 
-  <a
-    href="/dashboard/assignments"
-    class="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900"
-  >
-    <ArrowLeft class="size-4" />
-    Kembali ke katalog penugasan
-  </a>
+  <DirectAssignDialog members={members} />
 </DashboardLayout>

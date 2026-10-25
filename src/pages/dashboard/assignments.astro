@@ -16,10 +16,8 @@ import {
   User,
   Users,
   XMark,
-  Bolt,
 } from "../../lib/icons";
 import Button from "../../components/ui/Button.astro";
-import DirectAssignDialog from "../../components/admin/DirectAssignDialog.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
 import { listAllCategories, listCategories } from "../../lib/categories";
@@ -96,10 +94,6 @@ const noJabatanBadge =
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <Button type="button" variant="outline" data-direct-open disabled={members.length === 0}>
-        <Bolt class="size-4" />
-        Instruksi
-      </Button>
       <Button type="button" variant="outline" data-bulk-open disabled={members.length === 0}>
         <Users class="size-4" />
         Penugasan Massal
@@ -664,8 +658,6 @@ const noJabatanBadge =
       </div>
     </form>
   </dialog>
-
-  <DirectAssignDialog members={members} />
 </DashboardLayout>
 
 <script>
