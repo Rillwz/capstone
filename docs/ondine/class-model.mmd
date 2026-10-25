@@ -1,0 +1,109 @@
+---
+title: Model Kelas Inti — Umsura Assignment
+config:
+  class:
+    hierarchicalNamespaces: false
+---
+classDiagram
+  direction LR
+
+  namespace Inti {
+    class User {
+      <<tabel: users>>
+      +int id PK
+      +String name
+      +String email
+      +String password_hash
+      +Role role
+      +String jabatan
+    }
+    class Category {
+      <<tabel: categories>>
+      +String id PK
+      +String label
+      +String icon
+      +int position
+    }
+    class Activity {
+      <<tabel: activities>>
+      +int id PK
+      +String category_id FK
+      +String name
+      +String start_date
+      +String end_date
+      +bool utama
+      +bool periodik
+      +bool bukan_tupoksi
+      +Periode periode
+      +int frequency
+      +int minutes
+      +int sdm
+      +int volume
+    }
+    class Assignment {
+      <<tabel: assignments>>
+      +int id PK
+      +int user_id FK
+      +int activity_id FK
+      +String category_id
+      +int created_by FK
+      +String origin
+      +String seen_at
+    }
+    class ActivityLog {
+      <<tabel: activity_logs>>
+      +int id PK
+      +int user_id FK
+      +int activity_id FK
+      +String period_key
+      +Status status
+      +String completed_at
+    }
+    class OccurrenceNote {
+      <<tabel: occurrence_notes>>
+      +int user_id PK
+      +int activity_id PK
+      +String period_key PK
+      +String note
+      +String link
+    }
+  }
+
+  namespace Kosakata {
+    class Role {
+      <<enumerasi>>
+      Admin = 0
+      Level1 = 1
+      Level2 = 2
+    }
+    class Periode {
+      <<enumerasi>>
+      Harian
+      Mingguan
+      Bulanan
+      Triwulan
+      Semesteran
+      Tahunan
+      Kegiatan
+    }
+    class Status {
+      <<enumerasi>>
+      selesai
+      terlewat
+    }
+  }
+
+  Category "1" --> "*" Activity : category_id
+  Activity "1" --> "*" Assignment : activity_id
+  User "1" --> "*" Assignment : user_id
+  User "1" --> "*" Assignment : created_by
+  User "1" --> "*" ActivityLog : user_id
+  Activity "1" --> "*" ActivityLog : activity_id
+  User "1" --> "*" OccurrenceNote : user_id
+  Activity "1" --> "*" OccurrenceNote : activity_id
+  User ..> Role
+  Activity ..> Periode
+  ActivityLog ..> Status
+
+  note for Activity "volume = frekuensi x menit x SDM, dihitung di server<br/>category_id tanpa FK: integritas dijaga kode, bukan basis data"
+  note for ActivityLog "satu baris per kemunculan<br/>unik user + aktivitas + periode"
