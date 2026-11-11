@@ -6,7 +6,6 @@
 // Formulir ini cuma wadah field — submit-nya ditangani Astro Action.
 import { ClipboardDocumentCheck, MagnifyingGlass, XMark } from "../../lib/icons";
 import Button from "../ui/Button.astro";
-import ChoiceGroup from "../ui/ChoiceGroup.astro";
 import Input from "../ui/Input.astro";
 import { CLASSIFICATIONS, PERIODES } from "../../lib/activities";
 
@@ -26,7 +25,7 @@ const level1 = members.filter((member) => member.role === 1);
 const level2 = members.filter((member) => member.role === 2);
 ---
 
-<dialog id="direct-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-2xl" aria-labelledby="direct-title">
+<dialog id="direct-dialog" class="app-dialog w-[calc(100vw-2rem)] max-w-6xl" aria-labelledby="direct-title">
   <form method="POST" data-direct-form>
     <div class="flex items-start justify-between gap-3 p-5 pb-0 sm:px-6">
       <div>
@@ -58,49 +57,53 @@ const level2 = members.filter((member) => member.role === 2);
         <p class="text-sm font-medium text-slate-900">1. Aktivitas</p>
         <p class="mt-0.5 text-xs text-slate-500">Masuk ke unit Instruksi.</p>
 
-        <div class="mt-3 grid gap-4 sm:grid-cols-2">
-          <div class="sm:col-span-2">
-            <Input
-              label="Jenis aktivitas"
-              name="direct-name"
-              placeholder="mis. Menyusun laporan kegiatan bulanan"
-              required
-            />
-          </div>
-          <div class="grid grid-cols-2 gap-4 sm:col-span-2 sm:grid-cols-3">
-            <Input label="Mulai" name="direct-start" type="date" />
-            <Input label="Tenggat" name="direct-end" type="date" />
-            <Input label="Durasi (menit)" name="direct-minutes" type="number" value="60" required class="col-span-2 sm:col-span-1" />
-          </div>
-          <div class="sm:col-span-2">
-            <ChoiceGroup
-              label="Periode"
+        {/* One horizontal row, matching the MPP column order. `items-end` keeps the boxes on
+            one baseline although the long labels wrap. Below md the strip scrolls inside its
+            own box: at 390px the same 11 columns would shrink to ~27px, unusable. */}
+        <div class="mt-3 overflow-x-auto">
+          <div
+            class="direct-fields grid min-w-[56rem] items-end gap-2 grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,0.65fr)_minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,0.95fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.65fr)_minmax(0,0.75fr)]"
+          >
+          <Input label="Jenis Aktivitas" name="direct-name" placeholder="Menyusun laporan bulanan" required class="min-w-0" />
+          <Input label="Mulai" name="direct-start" type="date" class="min-w-0" />
+          <Input label="Tenggat" name="direct-end" type="date" class="min-w-0" />
+          {
+            CLASSIFICATIONS.map((item) => (
+              <div class="min-w-0">
+                <span class="mb-1 block text-[11px] leading-tight font-medium text-slate-700">{item.label}</span>
+                <label class="flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white">
+                  <input
+                    type="checkbox"
+                    name={item.value}
+                    class="size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+                  />
+                </label>
+              </div>
+            ))
+          }
+          <div class="min-w-0">
+            <label for="direct-periode" class="mb-1 block text-[11px] leading-tight font-medium text-slate-700">Periode</label>
+            <select
+              id="direct-periode"
               name="direct-periode"
-              options={PERIODES.map((periode) => ({ value: periode, label: periode }))}
-              value="Bulanan"
-            />
+              class="h-9 w-full rounded-lg border border-slate-300 bg-white px-1.5 text-xs text-slate-900 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
+            >
+              {PERIODES.map((periode) => <option value={periode} selected={periode === "Bulanan"}>{periode}</option>)}
+            </select>
           </div>
-          <div class="sm:col-span-2">
-            <ChoiceGroup
-              label="Klasifikasi"
-              multiple
-              options={CLASSIFICATIONS}
-              hint="Bisa pilih lebih dari satu, atau tidak sama sekali."
-            />
+          <Input label="Frekuensi/ Tahun" name="direct-frequency" type="number" value="12" required class="min-w-0" />
+          <Input label="Durasi (Menit)" name="direct-minutes" type="number" value="60" required class="min-w-0" />
+          <Input label="Jumlah SDM" name="direct-sdm" type="number" value="1" required class="min-w-0" />
+          <div class="min-w-0">
+            <span class="mb-1 block text-[11px] leading-tight font-medium text-slate-700">Volume Kerja</span>
+            <p
+              data-direct-volume
+              title="frekuensi × durasi × SDM"
+              class="flex h-9 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-1.5 text-xs text-slate-700 tabular-nums"
+            >
+              720
+            </p>
           </div>
-          <div class="grid gap-4 sm:col-span-2 sm:grid-cols-3">
-            <Input label="Frekuensi/ Tahun" name="direct-frequency" type="number" value="12" required />
-            <Input label="Jumlah SDM" name="direct-sdm" type="number" value="1" required />
-            <div>
-              <span class="mb-1.5 block text-sm font-medium text-slate-700">Volume Kerja</span>
-              <p
-                data-direct-volume
-                class="flex h-11 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-700 tabular-nums"
-              >
-                720
-              </p>
-              <p class="mt-1.5 text-xs text-slate-500">frekuensi × durasi × SDM.</p>
-            </div>
           </div>
         </div>
       </section>
@@ -331,8 +334,7 @@ const level2 = members.filter((member) => member.role === 2);
         utama: form.querySelector<HTMLInputElement>('[name="utama"]')?.checked ?? false,
         periodik: form.querySelector<HTMLInputElement>('[name="periodik"]')?.checked ?? false,
         bukan_tupoksi: form.querySelector<HTMLInputElement>('[name="bukan_tupoksi"]')?.checked ?? false,
-        periode: (form.querySelector<HTMLInputElement>('[name="direct-periode"]:checked')?.value ??
-          "Bulanan") as Periode,
+        periode: (form.elements.namedItem("direct-periode") as HTMLSelectElement).value as Periode,
         frequency: Number((form.elements.namedItem("direct-frequency") as HTMLInputElement).value || 0),
         minutes: Number((form.elements.namedItem("direct-minutes") as HTMLInputElement).value || 0),
         sdm: Number((form.elements.namedItem("direct-sdm") as HTMLInputElement).value || 0),
@@ -378,3 +380,35 @@ const level2 = members.filter((member) => member.role === 2);
   document.addEventListener("astro:page-load", init);
   init();
 </script>
+
+<style>
+  /* Eleven columns must fit on one row even on a phone, so the controls shrink instead of
+     wrapping. Plain CSS, not @apply — Tailwind v4 rejects utilities inside component styles. */
+  /* Labels wrap to two lines instead of overlapping: the columns are narrow by design, and
+     `items-end` on the grid keeps every control on the same baseline regardless. */
+  .direct-fields :global(> div > label:not(.flex)) {
+    margin-bottom: 0.25rem;
+    font-size: 11px;
+    line-height: 1.15;
+    overflow-wrap: break-word;
+  }
+
+  .direct-fields :global(input),
+  .direct-fields :global(select) {
+    height: 2.25rem;
+    padding-inline: 0.375rem;
+    font-size: 12px;
+  }
+
+  /* The spinner eats half of a 60px field. */
+  .direct-fields :global(input[type="number"]) {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  .direct-fields :global(input[type="number"]::-webkit-outer-spin-button),
+  .direct-fields :global(input[type="number"]::-webkit-inner-spin-button) {
+    appearance: none;
+    margin: 0;
+  }
+</style>

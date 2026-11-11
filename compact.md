@@ -475,7 +475,7 @@ Jakarta day in JS) and the latest logins/posts.
 | `src/pages/instruksi.astro` | admin "Instruksi": gives direct assignments (dialog lives here) and tracks their progress |
 | `src/components/GivenAssignments.astro` | shared tracker panel (summary counts, `?belum=1` filter, per-assignment cards) |
 | `src/components/user/TaskTimeline.astro` | per-period strip: selesai / terlewat / berjalan, ≤12 nodes |
-| `src/components/admin/DirectAssignDialog.astro` | the shared "Instruksi" dialog (admin + level 1) |
+| `src/components/admin/DirectAssignDialog.astro` | the shared "Instruksi" dialog (admin + level 1); "1. Aktivitas" is one horizontal row of 11 columns, `min-w-[56rem]` inside `overflow-x-auto` so it stays one row on a phone |
 | `src/components/user/TaskCard.astro` | task row, toggle button, `data-task-toggle` / `data-state` |
 | `src/components/user/ContributionGraph.astro` | the yearly heatmap (GitHub-style) on the user page |
 | `src/components/user/NoteDialog.astro` | note + link dialog, saves through `saveNote` |
@@ -552,6 +552,14 @@ scoping, the `penugasan-langsung` delete guard, the level-1 page and its 403s, m
 themes). It logs in as the real admin (`admin@assignment.id` / `password123`) and creates
 `uji-%` accounts for the rest; it cleans both up, including any direct activities.
 
+`instruksi-row.mjs` guards the horizontal "1. Aktivitas" strip: 11 cells, every control on
+one baseline at 1440px **and** at 390px, column order, nothing spilling out of its cell, no
+page-level overflow, the strip scrolling inside its own box on a phone, and volume
+recomputing. `instruksi-submit.mjs` then submits the reshaped form for real and asserts the
+`<select>` periode and the three checkboxes reached the action (`utama` defaults off), and
+`instruksi-penugasan.mjs` checks the same row on `/user/penugasan`, the component's second
+consumer. All three clean up their own rows.
+
 `given-check.mjs` covers the tracker: admin and level-1 pages, the giver line on the
 recipient side, progress flipping to selesai after a completed period, backdated
 `created_at` producing missed nodes and the "Terlambat" badge plus overdue-first sorting,
@@ -587,6 +595,21 @@ choice: name, start date, deadline, duration, periode, classification, frequency
 computed volume, then the recipient list grouped by level with the same jabatan badge and
 search/highlight as the bulk dialog. The unit is never chosen — it is always
 `penugasan-langsung`.
+
+"1. Aktivitas" is **one horizontal row**, in the MPP column order: Jenis Aktivitas, Mulai,
+Tenggat, Utama, Periodik, Bukan Tupoksi, Periode, Frekuensi/Tahun, Durasi (Menit), Jumlah
+SDM, Volume Kerja. Three consequences worth knowing before editing it:
+
+- Klasifikasi and Periode are no longer `ChoiceGroup` chips (seven chips and a 3-chip group
+  cannot fit a narrow column). Periode is a `<select>`, classification is three checkboxes
+  rendered from `CLASSIFICATIONS` — the field names stay `utama`/`periodik`/`bukan_tupoksi`,
+  so the submit payload is unchanged.
+- The grid uses `minmax(0, …fr)` columns plus `min-w-0` on each cell. Drop either and the
+  `w-full` inputs get an intrinsic width and the row overflows.
+- The strip is `min-w-[56rem]` inside an `overflow-x-auto` wrapper, so it is always one row
+  and the date fields stay legible; below ~896px the strip scrolls inside its own box. The
+  dialog itself is `max-w-6xl`. Labels sit above each control and may wrap to two lines —
+  `items-end` keeps the controls on one baseline despite that.
 
 `shortcut:` matching for reuse ignores the date range, so two jobs with the same name and
 periode are one definition. Match `start_date`/`end_date` too if per-date variants are ever
