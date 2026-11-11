@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ActivityInput, Periode } from "./activities";
+import type { AttendanceLocation, LocationValues } from "./attendance";
 import { activePeriod, currentPeriod, dbDateToIso, dueDate, pastPeriods, periodFromKey, todayIso } from "./tasks";
 
 // SQLite database lives in /data at project root.
@@ -74,6 +75,44 @@ db.exec(`
 
   -- Sebagian besar query hanya peduli yang masih menunggu, jadi indeks parsial.
   CREATE INDEX IF NOT EXISTS idx_reset_requests_pending ON password_reset_requests (status) WHERE status = 'pending';
+
+  -- Pengajuan lembur. Satu baris = satu pengajuan untuk satu tanggal; durasinya
+  -- dihitung dari jam_mulai/jam_selesai saat tampil, bukan disimpan.
+  CREATE TABLE IF NOT EXISTS overtime_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Tanggal sipil "YYYY-MM-DD" (hari lembur), bukan datetime: bebas dari zona waktu.
+    tanggal TEXT NOT NULL,
+    jam_mulai TEXT NOT NULL,
+    jam_selesai TEXT NOT NULL,
+    keterangan TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'disetujui', 'ditolak')),
+    -- Alasan penolakan / catatan persetujuan dari admin.
+    catatan_admin TEXT NOT NULL DEFAULT '',
+    -- NULL = hasil keputusan belum dilihat pemohon (lonceng di header).
+    seen_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    handled_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_overtime_pending ON overtime_requests (status) WHERE status = 'pending';
+
+  -- Satu pengajuan menunggu per orang per tanggal: klik berulang tidak jadi dua baris.
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_overtime_one_pending
+    ON overtime_requests (user_id, tanggal) WHERE status = 'pending';
+
+  CREATE INDEX IF NOT EXISTS idx_overtime_user ON overtime_requests (user_id, tanggal DESC, id DESC);
+
+  -- Setelan lembur: satu baris saja, supaya query tidak perlu memilih "yang terbaru".
+  CREATE TABLE IF NOT EXISTS overtime_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    -- Ambang pemicu tombol pengajuan: total menit tugas selesai hari ini.
+    min_minutes INTEGER NOT NULL DEFAULT 60,
+    -- Batas diam sebelum pengajuan ditolak otomatis.
+    expire_minutes INTEGER NOT NULL DEFAULT 180
+  );
+  INSERT OR IGNORE INTO overtime_settings (id) VALUES (1);
 
   -- Work units (kategori). Ikon disimpan sebagai kunci teks (lihat ICON_PALETTE di
   -- lib/categories.ts); urutan tampil mengikuti kolom position.
@@ -176,7 +215,85 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_occurrence_notes_user ON occurrence_notes (user_id);
+
+  -- Absensi: satu titik kantor (geofence) dan kejadian absen per orang per hari.
+  -- Titiknya singleton (CHECK id = 1) seperti overtime_settings: satu kantor, satu radius.
+  CREATE TABLE IF NOT EXISTS attendance_location (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    label TEXT NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    radius_m INTEGER NOT NULL DEFAULT 100 CHECK (radius_m BETWEEN 10 AND 300),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Satu baris = satu kejadian (masuk / pulang), bukan satu hari dengan dua kolom:
+  -- masing-masing membawa koordinat, akurasi, dan jaraknya sendiri. Tanggalnya hari
+  -- sipil Jakarta; jamnya created_at. location_label adalah salinan nama titik saat itu,
+  -- jadi mengganti nama kantor tidak menulis ulang sejarah.
+  CREATE TABLE IF NOT EXISTS attendance_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tanggal TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('masuk', 'pulang')),
+    location_label TEXT NOT NULL DEFAULT '',
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    accuracy_m REAL NOT NULL,
+    -- Dihitung server dari lat/lng; klien tidak pernah mengirim jarak.
+    distance_m REAL NOT NULL,
+    ip TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, tanggal, kind)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_attendance_day ON attendance_logs (tanggal, user_id);
 `);
+
+// Migration: the office point became a singleton (`attendance_location`). The old
+// multi-location table is folded in: the active row wins, `location_label` is copied into
+// every log so history keeps the name it was recorded under, then the old table is dropped.
+const attendanceTables = (
+  db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('attendance_locations', 'attendance_location')").all() as Array<{
+    name: string;
+  }>
+).map((row) => row.name);
+
+if (attendanceTables.includes("attendance_locations")) {
+  const legacy = db
+    .prepare("SELECT label, latitude, longitude, radius_m FROM attendance_locations ORDER BY active DESC, id LIMIT 1")
+    .get() as { label: string; latitude: number; longitude: number; radius_m: number } | undefined;
+
+  const logColumns = (db.prepare("PRAGMA table_info(attendance_logs)").all() as Array<{ name: string }>).map(
+    (column) => column.name,
+  );
+
+  db.pragma("foreign_keys = OFF");
+  db.transaction(() => {
+    if (legacy) {
+      db.prepare(
+        `INSERT OR REPLACE INTO attendance_location (id, label, latitude, longitude, radius_m)
+         VALUES (1, ?, ?, ?, ?)`,
+      ).run(legacy.label, legacy.latitude, legacy.longitude, legacy.radius_m);
+    }
+
+    if (logColumns.includes("location_id") && !logColumns.includes("location_label")) {
+      db.exec(`
+        ALTER TABLE attendance_logs ADD COLUMN location_label TEXT NOT NULL DEFAULT '';
+        UPDATE attendance_logs
+           SET location_label = COALESCE(
+                 (SELECT o.label FROM attendance_locations o WHERE o.id = attendance_logs.location_id),
+                 ''
+               );
+        ALTER TABLE attendance_logs DROP COLUMN location_id;
+      `);
+    }
+
+    db.exec("DROP TABLE attendance_locations;");
+  })();
+  db.pragma("foreign_keys = ON");
+}
 
 // Migration: "classification" (pick one) became three independent flags.
 const activityColumns = db.prepare("PRAGMA table_info(activities)").all() as Array<{ name: string }>;
@@ -236,6 +353,11 @@ if (!assignmentColumns.some((column) => column.name === "created_by")) {
 }
 if (!assignmentColumns.some((column) => column.name === "origin")) {
   db.exec("ALTER TABLE assignments ADD COLUMN origin TEXT NOT NULL DEFAULT '';");
+}
+// Migration: `archived_at` = penugasan diarsipkan. Barisnya tetap ada (catatan dan
+// riwayat utuh), hanya hilang dari dasbor dan lonceng pemegangnya. NULL = aktif.
+if (!assignmentColumns.some((column) => column.name === "archived_at")) {
+  db.exec("ALTER TABLE assignments ADD COLUMN archived_at TEXT;");
 }
 
 // Unit sistem tempat aktivitas hasil Instruksi bermuara. Dibuat idempoten,
@@ -523,11 +645,210 @@ export function handlePasswordReset(
   })();
 }
 
+// ---------------------------------------------------------------------------
+// Lembur: pengajuan dari pegawai, keputusan di sisi admin.
+// ---------------------------------------------------------------------------
+
+export interface OvertimeSettings {
+  /** Total menit tugas selesai hari ini yang membuka tombol pengajuan. */
+  min_minutes: number;
+  /** Batas diam sebelum pengajuan ditolak otomatis. */
+  expire_minutes: number;
+}
+
+export function getOvertimeSettings(): OvertimeSettings {
+  return db
+    .prepare("SELECT min_minutes, expire_minutes FROM overtime_settings WHERE id = 1")
+    .get() as OvertimeSettings;
+}
+
+export function saveOvertimeSettings(minMinutes: number, expireMinutes: number): void {
+  db.prepare("UPDATE overtime_settings SET min_minutes = ?, expire_minutes = ? WHERE id = 1").run(
+    minMinutes,
+    expireMinutes,
+  );
+}
+
+/**
+ * Tolak pengajuan yang tidak disentuh dalam batas waktu setelan.
+ *
+ * Tanpa cron: sapuan ini berjalan sebelum setiap pembacaan daftar. `handled_at` dihitung
+ * dari `created_at`, bukan dari waktu sapuan, jadi keputusannya sama walau sapuan baru
+ * jalan berjam-jam kemudian.
+ *
+ * shortcut: penolakannya baru tertulis saat ada yang membaca; batas waktunya sendiri tetap
+ * deterministik. Ganti dengan penjadwal kalau penulisan tepat waktu jadi syarat.
+ */
+export function expireOvertimeRequests(): number {
+  const { expire_minutes } = getOvertimeSettings();
+  const stamp = new Date(Date.now() - expire_minutes * 60_000).toISOString().slice(0, 19).replace("T", " ");
+  return db
+    .prepare(
+      `UPDATE overtime_requests
+          SET status = 'ditolak',
+              handled_at = datetime(created_at, ?),
+              catatan_admin = ?
+        WHERE status = 'pending' AND created_at <= ?`,
+    )
+    .run(
+      `+${expire_minutes} minutes`,
+      `Ditolak otomatis: tidak ditindaklanjuti dalam ${Math.round(expire_minutes / 60)} jam.`,
+      stamp,
+    ).changes;
+}
+
+export interface OvertimeInput {
+  tanggal: string;
+  jam_mulai: string;
+  jam_selesai: string;
+  keterangan: string;
+}
+
+export interface OvertimeRow extends OvertimeInput {
+  id: number;
+  user_id: number;
+  name: string;
+  email: string;
+  jabatan: string;
+  status: "pending" | "disetujui" | "ditolak";
+  catatan_admin: string;
+  created_at: string;
+  handled_at: string | null;
+  handled_by_name: string | null;
+}
+
+/** Ajukan lembur. "duplicate" bila sudah ada pengajuan menunggu di tanggal itu. */
+export function createOvertimeRequest(userId: number, input: OvertimeInput): "created" | "duplicate" {
+  expireOvertimeRequests();
+  const pending = db
+    .prepare("SELECT 1 FROM overtime_requests WHERE user_id = ? AND tanggal = ? AND status = 'pending'")
+    .get(userId, input.tanggal);
+  if (pending) return "duplicate";
+  db.prepare(
+    "INSERT INTO overtime_requests (user_id, tanggal, jam_mulai, jam_selesai, keterangan) VALUES (?, ?, ?, ?, ?)",
+  ).run(userId, input.tanggal, input.jam_mulai, input.jam_selesai, input.keterangan);
+  return "created";
+}
+
+/** Riwayat lembur milik satu orang, terbaru dulu. */
+export function listOwnOvertimeRequests(userId: number, limit = 50): OvertimeRow[] {
+  expireOvertimeRequests();
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id, r.tanggal, r.jam_mulai, r.jam_selesai, r.keterangan, r.status,
+              r.catatan_admin, r.created_at, r.handled_at, a.name AS handled_by_name,
+              u.name, u.email, u.jabatan
+         FROM overtime_requests r
+         JOIN users u ON u.id = r.user_id
+         LEFT JOIN users a ON a.id = r.handled_by
+        WHERE r.user_id = ?
+        ORDER BY r.tanggal DESC, r.id DESC
+        LIMIT ?`,
+    )
+    .all(userId, limit) as OvertimeRow[];
+}
+
+export function countPendingOvertime(): number {
+  expireOvertimeRequests();
+  return (
+    db.prepare("SELECT count(*) AS n FROM overtime_requests WHERE status = 'pending'").get() as {
+      n: number;
+    }
+  ).n;
+}
+
+/** Antrean admin: yang menunggu lebih dulu, lalu yang sudah ditangani (terbaru dulu). */
+export function listOvertimeRequests(limit = 100): OvertimeRow[] {
+  expireOvertimeRequests();
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id, r.tanggal, r.jam_mulai, r.jam_selesai, r.keterangan, r.status,
+              r.catatan_admin, r.created_at, r.handled_at, a.name AS handled_by_name,
+              u.name, u.email, u.jabatan
+         FROM overtime_requests r
+         JOIN users u ON u.id = r.user_id
+         LEFT JOIN users a ON a.id = r.handled_by
+        ORDER BY r.status = 'pending' DESC, r.tanggal DESC, r.id DESC
+        LIMIT ?`,
+    )
+    .all(limit) as OvertimeRow[];
+}
+
+/**
+ * Tutup satu pengajuan. Hanya baris `pending` yang bisa diputuskan, jadi form basi tidak
+ * bisa menyetujui dua kali.
+ *
+ * shortcut: satu tahap (admin). Tambah kolom `step` di sini kalau approver berjenjang masuk.
+ */
+export function handleOvertimeRequest(
+  id: number,
+  adminId: number,
+  decision: "disetujui" | "ditolak",
+  catatan = "",
+): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE overtime_requests
+            SET status = ?, handled_by = ?, handled_at = datetime('now'), catatan_admin = ?
+          WHERE id = ? AND status = 'pending'`,
+      )
+      .run(decision, adminId, catatan.trim(), id).changes > 0
+  );
+}
+
+/** Tarik pengajuan sendiri; hanya yang masih menunggu. */
+export function cancelOvertimeRequest(id: number, userId: number): boolean {
+  return (
+    db.prepare("DELETE FROM overtime_requests WHERE id = ? AND user_id = ? AND status = 'pending'").run(id, userId)
+      .changes > 0
+  );
+}
+
+/**
+ * Total menit tugas yang diselesaikan hari ini (Jakarta) — pemicu tombol pengajuan.
+ * Kandidat disaring di SQL dulu agar tidak memindai seluruh riwayat; hari sipilnya
+ * ditentukan di JS lewat dbDateToIso, sama seperti hitungan lain di berkas ini.
+ */
+export function completedMinutesToday(userId: number): number {
+  const rows = db
+    .prepare(
+      `SELECT l.completed_at, ac.minutes
+         FROM activity_logs l
+         JOIN activities ac ON ac.id = l.activity_id
+        WHERE l.user_id = ? AND l.status = 'selesai' AND l.completed_at IS NOT NULL
+          AND l.completed_at >= datetime('now', '-2 days')`,
+    )
+    .all(userId) as Array<{ completed_at: string; minutes: number }>;
+  const today = todayIso();
+  return rows.reduce((sum, row) => (dbDateToIso(row.completed_at) === today ? sum + row.minutes : sum), 0);
+}
+
+/** Keputusan lembur yang belum dilihat pemohon (untuk lonceng). */
+export function listUnseenOvertimeResults(userId: number): OvertimeRow[] {
+  expireOvertimeRequests();
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id, r.tanggal, r.jam_mulai, r.jam_selesai, r.keterangan, r.status,
+              r.catatan_admin, r.created_at, r.handled_at, a.name AS handled_by_name
+         FROM overtime_requests r
+         LEFT JOIN users a ON a.id = r.handled_by
+        WHERE r.user_id = ? AND r.status <> 'pending' AND r.seen_at IS NULL
+        ORDER BY r.id DESC`,
+    )
+    .all(userId) as OvertimeRow[];
+}
+
+export function markOvertimeResultsSeen(userId: number): number {
+  return db
+    .prepare("UPDATE overtime_requests SET seen_at = datetime('now') WHERE user_id = ? AND status <> 'pending' AND seen_at IS NULL")
+    .run(userId).changes;
+}
+
 export interface PositionRow {
   id: number;
   label: string;
 }
-
 export function listPositions(): PositionRow[] {
   return db
     .prepare("SELECT id, label FROM positions ORDER BY label COLLATE NOCASE")
@@ -741,10 +1062,10 @@ export function getStats(): Stats {
          (SELECT count(*) FROM activities WHERE category_id <> ?) AS activities,
          (SELECT count(DISTINCT g.activity_id)
             FROM assignments g JOIN activities ac ON ac.id = g.activity_id
-           WHERE ac.category_id <> ?) AS assignedActivities,
+           WHERE ac.category_id <> ? AND g.archived_at IS NULL) AS assignedActivities,
          (SELECT count(*) FROM users u
            WHERE u.role <> 0
-             AND NOT EXISTS (SELECT 1 FROM assignments g WHERE g.user_id = u.id)) AS usersWithoutAssignments`,
+             AND NOT EXISTS (SELECT 1 FROM assignments g WHERE g.user_id = u.id AND g.archived_at IS NULL)) AS usersWithoutAssignments`,
     )
     .get(DIRECT_CATEGORY, DIRECT_CATEGORY, DIRECT_CATEGORY) as Stats;
 }
@@ -771,7 +1092,7 @@ export function listCategoryCoverage(): CategoryCoverage[] {
               count(DISTINCT g.user_id) AS people
        FROM categories c
        LEFT JOIN activities ac ON ac.category_id = c.id
-       LEFT JOIN assignments g ON g.activity_id = ac.id
+       LEFT JOIN assignments g ON g.activity_id = ac.id AND g.archived_at IS NULL
        WHERE c.id <> ?
        GROUP BY c.id
        ORDER BY c.position, c.label COLLATE NOCASE`,
@@ -924,6 +1245,7 @@ export function listAssignmentUsers(): AssignmentUserRow[] {
               count(g.id) AS activity_count,
               count(DISTINCT g.category_id) AS unit_count
        FROM assignments g JOIN users u ON u.id = g.user_id
+       WHERE g.archived_at IS NULL
        GROUP BY u.id
        ORDER BY u.name COLLATE NOCASE`,
     )
@@ -936,7 +1258,7 @@ export function listAssignedActivitiesForUser(userId: number) {
     .prepare(
       `SELECT ac.id, ac.name, ac.periode, ac.category_id
        FROM assignments g JOIN activities ac ON ac.id = g.activity_id
-       WHERE g.user_id = ?
+       WHERE g.user_id = ? AND g.archived_at IS NULL
        ORDER BY ac.category_id, ac.name COLLATE NOCASE`,
     )
     .all(userId) as Array<{ id: number; name: string; periode: string; category_id: string }>;
@@ -950,7 +1272,8 @@ export function listActivityCatalog(userId: number) {
   return db
     .prepare(
       `SELECT ac.id, ac.name, ac.category_id, ac.periode,
-              (SELECT 1 FROM assignments g WHERE g.activity_id = ac.id AND g.user_id = ?) AS assigned
+              COALESCE((SELECT 1 FROM assignments g WHERE g.activity_id = ac.id AND g.user_id = ? AND g.archived_at IS NULL), 0) AS assigned
+
        FROM activities ac ORDER BY ac.name COLLATE NOCASE`,
     )
     .all(userId) as Array<{ id: number; name: string; category_id: string; periode: string; assigned: number }>;
@@ -961,6 +1284,10 @@ export function listActivityCatalog(userId: number) {
  * activity row itself, so a tampered category in the form cannot attach an activity
  * to another unit. Pairs that already exist are skipped by UNIQUE(user_id,
  * activity_id), so the caller only reports how many were actually new.
+ *
+ * An archived pair is revived instead of skipped: giving someone an activity again
+ * must bring it back to their dashboard. `created_at` restarts so the archived stretch
+ * does not count as missed periods.
  */
 export function createAssignmentsBulk(
   userIds: number[],
@@ -970,7 +1297,11 @@ export function createAssignmentsBulk(
 ): number {
   const lookup = db.prepare("SELECT category_id FROM activities WHERE id = ?");
   const insert = db.prepare(
-    "INSERT OR IGNORE INTO assignments (user_id, category_id, activity_id, created_by, origin) VALUES (?, ?, ?, ?, ?)",
+    `INSERT INTO assignments (user_id, category_id, activity_id, created_by, origin) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, activity_id) DO UPDATE
+       SET archived_at = NULL, seen_at = NULL, created_at = datetime('now'),
+           created_by = excluded.created_by, origin = excluded.origin
+       WHERE archived_at IS NOT NULL`,
   );
   let added = 0;
   db.transaction(() => {
@@ -1022,7 +1353,7 @@ export interface NewAssignment {
 /** Jumlah penugasan yang belum dibaca — angka di lonceng. */
 export function countUnseenAssignments(userId: number): number {
   const row = db
-    .prepare("SELECT count(*) AS n FROM assignments WHERE user_id = ? AND seen_at IS NULL")
+    .prepare("SELECT count(*) AS n FROM assignments WHERE user_id = ? AND archived_at IS NULL AND seen_at IS NULL")
     .get(userId) as { n: number };
   return row.n;
 }
@@ -1036,17 +1367,21 @@ export function listNewAssignments(userId: number): NewAssignment[] {
        FROM assignments g
        JOIN activities ac ON ac.id = g.activity_id
        LEFT JOIN users gv ON gv.id = g.created_by
-       WHERE g.user_id = ? AND g.seen_at IS NULL
+       WHERE g.user_id = ? AND g.archived_at IS NULL AND g.seen_at IS NULL
        ORDER BY g.created_at DESC, g.id DESC`,
     )
     .all(userId) as NewAssignment[];
 }
 
-/** Tandai semua penugasan user sudah dibaca. Balikan jumlah baris yang berubah. */
-export function markAssignmentsSeen(userId: number): number {
-  return db
-    .prepare("UPDATE assignments SET seen_at = datetime('now') WHERE user_id = ? AND seen_at IS NULL")
+/**
+ * Tandai semua penugasan user sudah dibaca. Balikan jumlah baris yang berubah.
+ * Lonceng kini juga membawa hasil lembur, jadi keduanya ditandai bersama.
+ */
+export function markNotificationsSeen(userId: number): number {
+  const assignments = db
+    .prepare("UPDATE assignments SET seen_at = datetime('now') WHERE user_id = ? AND archived_at IS NULL AND seen_at IS NULL")
     .run(userId).changes;
+  return assignments + markOvertimeResultsSeen(userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,7 +1480,7 @@ export function listGivenAssignments(createdBy: number, onlyUnfinished = false):
        FROM assignments g
        JOIN activities ac ON ac.id = g.activity_id
        JOIN users u ON u.id = g.user_id
-       WHERE g.created_by = ? AND g.origin = 'langsung'
+       WHERE g.created_by = ? AND g.origin = 'langsung' AND g.archived_at IS NULL
        ORDER BY g.created_at DESC, g.id DESC`,
     )
     .all(createdBy) as Array<{
@@ -1169,7 +1504,7 @@ export function listGivenAssignments(createdBy: number, onlyUnfinished = false):
       `SELECT l.activity_id, l.user_id, l.period_key, l.status, l.completed_at
        FROM activity_logs l
        JOIN assignments g ON g.user_id = l.user_id AND g.activity_id = l.activity_id
-       WHERE g.created_by = ? AND g.origin = 'langsung'`,
+       WHERE g.created_by = ? AND g.origin = 'langsung' AND g.archived_at IS NULL`,
     )
     .all(createdBy) as Array<{
     activity_id: number;
@@ -1266,12 +1601,73 @@ export function deleteAssignmentActivity(userId: number, activityId: number): vo
   })();
 }
 
-/** Un-assign everything a user carries, across all units. */
+/**
+ * Un-assign everything a user still carries. Archived rows are left alone: they are
+ * not on screen, so a click here must not silently destroy them.
+ */
 export function deleteAssignment(userId: number): void {
   db.transaction(() => {
-    db.prepare("DELETE FROM occurrence_notes WHERE user_id = ?").run(userId);
-    db.prepare("DELETE FROM assignments WHERE user_id = ?").run(userId);
+    db.prepare(
+      `DELETE FROM occurrence_notes
+       WHERE user_id = ? AND activity_id IN (
+         SELECT activity_id FROM assignments WHERE user_id = ? AND archived_at IS NULL
+       )`,
+    ).run(userId, userId);
+    db.prepare("DELETE FROM assignments WHERE user_id = ? AND archived_at IS NULL").run(userId);
   })();
+}
+
+// ---------------------------------------------------------------------------
+// Arsip penugasan: barisnya tetap ada (catatan & riwayat utuh), hanya disembunyikan
+// dari dasbor dan lonceng pemegangnya.
+// ---------------------------------------------------------------------------
+
+/** Arsipkan satu penugasan yang masih aktif. Balikan false kalau barisnya tidak ada. */
+export function archiveAssignment(userId: number, activityId: number): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE assignments SET archived_at = datetime('now')
+         WHERE user_id = ? AND activity_id = ? AND archived_at IS NULL`,
+      )
+      .run(userId, activityId).changes > 0
+  );
+}
+
+/**
+ * Pulihkan satu penugasan yang diarsipkan.
+ *
+ * `created_at` ikut direset: periode dihitung dari tanggal penugasan, jadi masa arsip
+ * akan langsung terbaca sebagai puluhan periode terlewat. Dipulihkan = mulai hari ini.
+ */
+export function restoreAssignment(userId: number, activityId: number): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE assignments
+         SET archived_at = NULL, seen_at = NULL, created_at = datetime('now')
+         WHERE user_id = ? AND activity_id = ? AND archived_at IS NOT NULL`,
+      )
+      .run(userId, activityId).changes > 0
+  );
+}
+
+/** Aktivitas yang diarsipkan dari satu user, terbaru diarsipkan lebih dulu. */
+export function listArchivedActivitiesForUser(userId: number) {
+  return db
+    .prepare(
+      `SELECT ac.id, ac.name, ac.periode, ac.category_id, g.archived_at
+       FROM assignments g JOIN activities ac ON ac.id = g.activity_id
+       WHERE g.user_id = ? AND g.archived_at IS NOT NULL
+       ORDER BY g.archived_at DESC, ac.name COLLATE NOCASE`,
+    )
+    .all(userId) as Array<{
+    id: number;
+    name: string;
+    periode: string;
+    category_id: string;
+    archived_at: string;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,7 +1752,7 @@ export function materializeOverdue(userId: number): void {
     .prepare(
       `SELECT g.activity_id, g.created_at, ac.periode, ac.start_date, ac.end_date
        FROM assignments g JOIN activities ac ON ac.id = g.activity_id
-       WHERE g.user_id = ?`,
+       WHERE g.user_id = ? AND g.archived_at IS NULL`,
     )
     .all(userId) as Array<{
     activity_id: number;
@@ -1403,7 +1799,7 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
        FROM assignments g
        JOIN activities ac ON ac.id = g.activity_id
        LEFT JOIN users gv ON gv.id = g.created_by
-       WHERE g.user_id = ?
+       WHERE g.user_id = ? AND g.archived_at IS NULL
        ORDER BY ac.category_id, ac.name COLLATE NOCASE`,
     )
     .all(userId) as Array<{
@@ -1513,7 +1909,7 @@ export function listMissedTasks(userId: number): MissedTask[] {
        FROM activity_logs l
        JOIN activities ac ON ac.id = l.activity_id
        JOIN assignments g ON g.activity_id = l.activity_id AND g.user_id = l.user_id
-       WHERE l.user_id = ? AND l.status = 'terlewat'
+       WHERE l.user_id = ? AND l.status = 'terlewat' AND g.archived_at IS NULL
        GROUP BY l.activity_id`,
     )
     .all(userId) as Array<{
@@ -1555,7 +1951,7 @@ export function completeOccurrence(
     .prepare(
       `SELECT ac.periode, ac.start_date, ac.end_date
        FROM assignments g JOIN activities ac ON ac.id = g.activity_id
-       WHERE g.user_id = ? AND g.activity_id = ?`,
+       WHERE g.user_id = ? AND g.activity_id = ? AND g.archived_at IS NULL`,
     )
     .get(userId, activityId) as
     | { periode: Periode; start_date: string; end_date: string }
@@ -1610,7 +2006,7 @@ export function undoOccurrence(
     .prepare(
       `SELECT ac.periode, ac.start_date, ac.end_date
        FROM assignments g JOIN activities ac ON ac.id = g.activity_id
-       WHERE g.user_id = ? AND g.activity_id = ?`,
+       WHERE g.user_id = ? AND g.activity_id = ? AND g.archived_at IS NULL`,
     )
     .get(userId, activityId) as
     | { periode: Periode; start_date: string; end_date: string }
@@ -1792,6 +2188,298 @@ export function taskStats(userId: number): TaskStats {
     missed: listMissedTasks(userId).reduce((sum, item) => sum + item.count, 0),
     doneMonth: countCompletedBetween(userId, `${today.slice(0, 7)}-01`, today),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Absensi: satu titik kantor (geofence) + kejadian masuk/pulang per hari.
+// ---------------------------------------------------------------------------
+
+/** The single office point, or null while the admin has not set one. */
+export function getAttendanceLocation(): AttendanceLocation | null {
+  const row = db
+    .prepare("SELECT id, label, latitude, longitude, radius_m FROM attendance_location WHERE id = 1")
+    .get() as AttendanceLocation | undefined;
+  return row ?? null;
+}
+
+/** Create or replace the one location. There is no second row to pick. */
+export function saveAttendanceLocation(input: LocationValues): void {
+  db.prepare(
+    `INSERT INTO attendance_location (id, label, latitude, longitude, radius_m, updated_at)
+     VALUES (1, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (id) DO UPDATE SET
+       label = excluded.label,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       radius_m = excluded.radius_m,
+       updated_at = excluded.updated_at`,
+  ).run(input.label, input.latitude, input.longitude, input.radius_m);
+}
+
+export interface AttendanceRow {
+  id: number;
+  user_id: number;
+  tanggal: string;
+  kind: "masuk" | "pulang";
+  /** Nama kantor saat kejadian itu dicatat — bukan nama sekarang. */
+  location_label: string;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number;
+  distance_m: number;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+}
+
+const ATTENDANCE_COLUMNS = `l.id, l.user_id, l.tanggal, l.kind, l.location_label, l.latitude, l.longitude,
+              l.accuracy_m, l.distance_m, l.ip, l.user_agent, l.created_at`;
+
+/** One person's own rows for one day. */
+export function listAttendanceForDay(userId: number, tanggal: string): AttendanceRow[] {
+  return db
+    .prepare(
+      `SELECT ${ATTENDANCE_COLUMNS}
+         FROM attendance_logs l
+        WHERE l.user_id = ? AND l.tanggal = ?
+        ORDER BY l.id`,
+    )
+    .all(userId, tanggal) as AttendanceRow[];
+}
+
+export interface AttendanceSnapshot {
+  hasCheckedIn: boolean;
+  hasCheckedOut: boolean;
+  /** true when `kind` was already recorded today. */
+  alreadyRecorded: (kind: "masuk" | "pulang") => boolean;
+}
+
+/** Today's state for one person, shaped for `judgeAttendance`. */
+export function attendanceState(userId: number, tanggal: string): AttendanceSnapshot {
+  const kinds = new Set(
+    (
+      db.prepare("SELECT kind FROM attendance_logs WHERE user_id = ? AND tanggal = ?").all(userId, tanggal) as Array<{
+        kind: "masuk" | "pulang";
+      }>
+    ).map((row) => row.kind),
+  );
+  return {
+    hasCheckedIn: kinds.has("masuk"),
+    hasCheckedOut: kinds.has("pulang"),
+    alreadyRecorded: (kind) => kinds.has(kind),
+  };
+}
+
+export interface AttendanceInput {
+  kind: "masuk" | "pulang";
+  location_label: string;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number;
+  distance_m: number;
+  ip: string;
+  user_agent: string;
+}
+
+/** Record one check-in. Returns false when the UNIQUE index already holds that row. */
+export function createAttendanceLog(userId: number, tanggal: string, input: AttendanceInput): boolean {
+  const info = db
+    .prepare(
+      `INSERT OR IGNORE INTO attendance_logs
+         (user_id, tanggal, kind, location_label, latitude, longitude, accuracy_m, distance_m, ip, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      userId,
+      tanggal,
+      input.kind,
+      input.location_label,
+      input.latitude,
+      input.longitude,
+      input.accuracy_m,
+      input.distance_m,
+      input.ip,
+      input.user_agent,
+    );
+  return info.changes > 0;
+}
+
+/** Recap for one date: every employee row joined with their account, masuk and pulang side by side. */
+export interface AttendanceRecapRow {
+  user_id: number;
+  name: string;
+  email: string;
+  jabatan: string;
+  role: 0 | 1 | 2;
+  masuk_at: string | null;
+  pulang_at: string | null;
+  masuk_location: string | null;
+  pulang_location: string | null;
+  masuk_distance: number | null;
+  pulang_distance: number | null;
+  masuk_latitude: number | null;
+  masuk_longitude: number | null;
+  pulang_latitude: number | null;
+  pulang_longitude: number | null;
+  masuk_accuracy: number | null;
+  pulang_accuracy: number | null;
+}
+
+/**
+ * The admin search term, as a LIKE pattern. Escaped like `listPostsPage` so a typed
+ * `%` or `_` stays literal instead of matching everything.
+ */
+const likeTerm = (search: string) => `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+
+/** Name/email/jabatan filter for the attendance reports. `q` is already trimmed. */
+const attendanceUserFilter = (search: string) =>
+  search
+    ? ` AND (u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\' OR u.jabatan LIKE ? ESCAPE '\\')`
+    : "";
+
+const attendanceUserFilterParams = (search: string) =>
+  search ? [likeTerm(search), likeTerm(search), likeTerm(search)] : [];
+
+export function listAttendanceRecap(tanggal: string, search = ""): AttendanceRecapRow[] {
+  return db
+    .prepare(
+      `SELECT u.id AS user_id, u.name, u.email, u.jabatan, u.role,
+              mi.created_at AS masuk_at, pu.created_at AS pulang_at,
+              mi.location_label AS masuk_location, pu.location_label AS pulang_location,
+              mi.distance_m AS masuk_distance, pu.distance_m AS pulang_distance,
+              mi.latitude AS masuk_latitude, mi.longitude AS masuk_longitude,
+              pu.latitude AS pulang_latitude, pu.longitude AS pulang_longitude,
+              mi.accuracy_m AS masuk_accuracy, pu.accuracy_m AS pulang_accuracy
+         FROM users u
+         LEFT JOIN attendance_logs mi
+           ON mi.user_id = u.id AND mi.tanggal = ? AND mi.kind = 'masuk'
+         LEFT JOIN attendance_logs pu
+           ON pu.user_id = u.id AND pu.tanggal = ? AND pu.kind = 'pulang'
+        WHERE u.role <> 0${attendanceUserFilter(search)}
+          AND (mi.id IS NOT NULL OR pu.id IS NOT NULL)
+        ORDER BY mi.created_at IS NULL, mi.created_at, u.name COLLATE NOCASE`,
+    )
+    .all(tanggal, tanggal, ...attendanceUserFilterParams(search)) as AttendanceRecapRow[];
+}
+
+/** Non-admin accounts with no `masuk` row on `tanggal`. Derived, never stored. */
+export interface AttendanceMissingRow {
+  id: number;
+  name: string;
+  email: string;
+  jabatan: string;
+  role: 0 | 1 | 2;
+}
+
+export function listAttendanceMissing(tanggal: string, search = ""): AttendanceMissingRow[] {
+  return db
+    .prepare(
+      `SELECT u.id, u.name, u.email, u.jabatan, u.role
+         FROM users u
+        WHERE u.role <> 0${attendanceUserFilter(search)}
+          AND NOT EXISTS (
+            SELECT 1 FROM attendance_logs l
+             WHERE l.user_id = u.id AND l.tanggal = ? AND l.kind = 'masuk'
+          )
+        ORDER BY u.name COLLATE NOCASE`,
+    )
+    .all(...attendanceUserFilterParams(search), tanggal) as AttendanceMissingRow[];
+}
+
+/**
+ * Non-admin accounts with no `masuk` row anywhere in `[start, end]` — the monthly and
+ * yearly "belum absen" list. A person who came once is not missing, just partly present,
+ * so `listAttendanceSummary` is what shows the partial cases.
+ */
+export function listAttendanceMissingRange(start: string, end: string, search = ""): AttendanceMissingRow[] {
+  return db
+    .prepare(
+      `SELECT u.id, u.name, u.email, u.jabatan, u.role
+         FROM users u
+        WHERE u.role <> 0${attendanceUserFilter(search)}
+          AND NOT EXISTS (
+            SELECT 1 FROM attendance_logs l
+             WHERE l.user_id = u.id AND l.kind = 'masuk'
+               AND l.tanggal BETWEEN ? AND ?
+          )
+        ORDER BY u.name COLLATE NOCASE`,
+    )
+    .all(...attendanceUserFilterParams(search), start, end) as AttendanceMissingRow[];
+}
+
+/** One person's totals over a range — the row of the monthly and yearly reports. */
+export interface AttendanceSummaryRow {
+  user_id: number;
+  name: string;
+  email: string;
+  jabatan: string;
+  role: 0 | 1 | 2;
+  days_in: number;
+  days_out: number;
+  first_day: string | null;
+  last_day: string | null;
+}
+
+/**
+ * Every non-admin, including those with zero rows: a monthly report that hides the
+ * absentees is the one thing the report exists to show. `days_out > days_in` cannot
+ * happen — the action refuses `pulang` without `masuk` on the same day.
+ */
+export function listAttendanceSummary(start: string, end: string, search = ""): AttendanceSummaryRow[] {
+  return db
+    .prepare(
+      `SELECT u.id AS user_id, u.name, u.email, u.jabatan, u.role,
+              count(DISTINCT CASE WHEN l.kind = 'masuk'  THEN l.tanggal END) AS days_in,
+              count(DISTINCT CASE WHEN l.kind = 'pulang' THEN l.tanggal END) AS days_out,
+              min(CASE WHEN l.kind = 'masuk' THEN l.tanggal END) AS first_day,
+              max(CASE WHEN l.kind = 'masuk' THEN l.tanggal END) AS last_day
+         FROM users u
+         LEFT JOIN attendance_logs l
+           ON l.user_id = u.id AND l.tanggal BETWEEN ? AND ?
+        WHERE u.role <> 0${attendanceUserFilter(search)}
+        GROUP BY u.id
+        ORDER BY u.name COLLATE NOCASE`,
+    )
+    .all(start, end, ...attendanceUserFilterParams(search)) as AttendanceSummaryRow[];
+}
+
+/** One filled cell of the yearly grid: a person, a month (1–12), a count of days in. */
+export interface AttendanceMonthCell {
+  user_id: number;
+  month: number;
+  days_in: number;
+}
+
+/** Days present per person per month, for the yearly grid. Flat; the page pivots it. */
+export function listAttendanceMonthCells(start: string, end: string, search = ""): AttendanceMonthCell[] {
+  return db
+    .prepare(
+      `SELECT l.user_id, CAST(substr(l.tanggal, 6, 2) AS INTEGER) AS month, count(DISTINCT l.tanggal) AS days_in
+         FROM attendance_logs l
+         JOIN users u ON u.id = l.user_id
+        WHERE l.kind = 'masuk'
+          AND l.tanggal BETWEEN ? AND ?${attendanceUserFilter(search)}
+        GROUP BY l.user_id, month`,
+    )
+    .all(start, end, ...attendanceUserFilterParams(search)) as AttendanceMonthCell[];
+}
+
+/** One person's own history, newest day first. */
+export function listOwnAttendance(userId: number, limit = 60): AttendanceRow[] {
+  return db
+    .prepare(
+      `SELECT ${ATTENDANCE_COLUMNS}
+         FROM attendance_logs l
+        WHERE l.user_id = ?
+        ORDER BY l.tanggal DESC, l.id DESC
+        LIMIT ?`,
+    )
+    .all(userId, limit) as AttendanceRow[];
+}
+
+/** Count of non-admins without a `masuk` row today — the admin nav badge. */
+export function countAttendanceMissing(tanggal: string): number {
+  return listAttendanceMissing(tanggal).length;
 }
 
 export { db };

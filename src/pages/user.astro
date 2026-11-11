@@ -20,7 +20,7 @@ import {
   listDailyActivity,
   listMissedTasks,
   listUserOccurrences,
-  markAssignmentsSeen,
+  markNotificationsSeen,
   materializeOverdue,
   taskStats,
 } from "../lib/db";
@@ -39,7 +39,7 @@ const today = todayIso();
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
   if (form.get("action") === "seen") {
-    markAssignmentsSeen(userId);
+    markNotificationsSeen(userId);
     return Astro.redirect("/user?inbox=1");
   }
 }

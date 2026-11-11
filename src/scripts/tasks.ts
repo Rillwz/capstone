@@ -176,8 +176,8 @@ export function clearBell(root: ParentNode = document) {
   if (!bell) return;
   bell.querySelector("[data-bell-count]")?.remove();
   bell.dataset.unseen = "0";
-  bell.setAttribute("aria-label", "Pekerjaan masuk");
-  bell.setAttribute("title", "Pekerjaan masuk");
+  bell.setAttribute("aria-label", "Notifikasi");
+  bell.setAttribute("title", "Notifikasi");
 }
 
 /** Memasang catatan & tautan pada satu kartu (kosong keduanya berarti dihapus). */

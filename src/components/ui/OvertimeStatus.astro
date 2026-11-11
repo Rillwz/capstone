@@ -1,0 +1,29 @@
+---
+// Chip status pengajuan lembur. Satu file supaya dua halaman memakai warna & label sama.
+import { CheckBadge, Clock, XCircle } from "../../lib/icons";
+
+interface Props {
+  status: "pending" | "disetujui" | "ditolak";
+}
+
+const { status } = Astro.props;
+
+const TONES = {
+  pending: { Icon: Clock, label: "Menunggu", class: "bg-amber-50 text-amber-700" },
+  disetujui: { Icon: CheckBadge, label: "Disetujui", class: "bg-emerald-50 text-emerald-700" },
+  ditolak: { Icon: XCircle, label: "Ditolak", class: "bg-red-50 text-red-700" },
+} as const;
+
+const tone = TONES[status];
+const StatusIcon = tone.Icon;
+---
+
+<span
+  class:list={[
+    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+    tone.class,
+  ]}
+>
+  <StatusIcon class="size-3.5" />
+  {tone.label}
+</span>

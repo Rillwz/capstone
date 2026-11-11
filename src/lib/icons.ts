@@ -10,6 +10,7 @@
 
 export { default as AcademicCap } from "heroicons/24/outline/academic-cap.svg";
 export { default as ArchiveBox } from "heroicons/24/outline/archive-box.svg";
+export { default as ArrowDownTray } from "heroicons/24/outline/arrow-down-tray.svg";
 export { default as ArrowLeft } from "heroicons/24/outline/arrow-left.svg";
 export { default as ArrowTrendingUp } from "heroicons/24/outline/arrow-trending-up.svg";
 export { default as ArrowLeftOnRectangle } from "heroicons/24/outline/arrow-left-on-rectangle.svg";
@@ -56,6 +57,7 @@ export { default as Link } from "heroicons/24/outline/link.svg";
 export { default as ListBullet } from "heroicons/24/outline/list-bullet.svg";
 export { default as LockClosed } from "heroicons/24/outline/lock-closed.svg";
 export { default as MagnifyingGlass } from "heroicons/24/outline/magnifying-glass.svg";
+export { default as MapPin } from "heroicons/24/outline/map-pin.svg";
 export { default as Megaphone } from "heroicons/24/outline/megaphone.svg";
 export { default as Moon } from "heroicons/24/outline/moon.svg";
 export { default as Newspaper } from "heroicons/24/outline/newspaper.svg";

@@ -7,12 +7,18 @@ import { z } from "astro/zod";
 import bcrypt from "bcryptjs";
 import { getSession } from "auth-astro/server";
 import {
+  archiveAssignment,
+  attendanceState,
+  cancelOvertimeRequest,
   completeOccurrence,
+  completedMinutesToday,
   createActivity,
   createAssignments,
   createAssignmentsBulk,
+  createAttendanceLog,
   createCategory,
   createDirectAssignment,
+  createOvertimeRequest,
   createPost,
   createPosition,
   createUser,
@@ -26,8 +32,14 @@ import {
   deletePosition,
   deleteUser,
   getUserById,
-  markAssignmentsSeen,
+  getOvertimeSettings,
+  handleOvertimeRequest,
+  getAttendanceLocation,
+  markNotificationsSeen,
   materializeOverdue,
+  restoreAssignment,
+  saveAttendanceLocation,
+  saveOvertimeSettings,
   setOccurrenceNote,
   taskStats,
   undoOccurrence,
@@ -41,6 +53,13 @@ import { ICON_PALETTE } from "../lib/categories";
 import { DEFAULT_USER_PASSWORD } from "../lib/defaults";
 import { NOTE_MAX, parseNoteValues } from "../lib/notes";
 import { PERIODES, parseActivityValues } from "../lib/activities";
+import { parseOvertimeValues } from "../lib/overtime";
+import {
+  judgeAttendance,
+  parseCheckValues,
+  parseLocationValues,
+} from "../lib/attendance";
+import { todayIso } from "../lib/tasks";
 
 /** The signed-in user, or a 401 — an action runs on the server, so it checks itself. */
 async function currentUserId(context: ActionAPIContext): Promise<number> {
@@ -196,7 +215,7 @@ export const server = {
     },
   }),
 
-  /** Lepas semua penugasan seorang user. */
+  /** Lepas semua penugasan aktif seorang user. Yang diarsipkan tidak ikut terhapus. */
   clearAssignments: defineAction({
     input: z.object({ userId: z.number().int().positive() }),
     handler: async (input, context) => {
@@ -206,15 +225,47 @@ export const server = {
     },
   }),
 
+  /** Arsipkan satu penugasan: hilang dari dasbor pegawai, riwayatnya tetap tersimpan. */
+  archiveAssignment: defineAction({
+    input: z.object({
+      userId: z.number().int().positive(),
+      activityId: z.number().int().positive(),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const archived = archiveAssignment(input.userId, input.activityId);
+      if (!archived) {
+        throw new ActionError({ code: "NOT_FOUND", message: "Penugasan ini sudah diarsipkan." });
+      }
+      return {};
+    },
+  }),
+
+  /** Pulihkan penugasan yang diarsipkan; periodenya mulai dihitung dari hari ini. */
+  restoreAssignment: defineAction({
+    input: z.object({
+      userId: z.number().int().positive(),
+      activityId: z.number().int().positive(),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const restored = restoreAssignment(input.userId, input.activityId);
+      if (!restored) {
+        throw new ActionError({ code: "NOT_FOUND", message: "Penugasan ini tidak sedang diarsipkan." });
+      }
+      return {};
+    },
+  }),
+
   /**
    * Tandai "pekerjaan masuk" milik sesi ini sudah dibaca. Tanpa parameter userId:
    * klien tidak boleh menandai milik orang lain.
    */
-  markAssignmentsSeen: defineAction({
+  markNotificationsSeen: defineAction({
     input: z.object({}),
     handler: async (_input, context) => {
       const userId = await currentUserId(context);
-      return { seen: markAssignmentsSeen(userId) };
+      return { seen: markNotificationsSeen(userId) };
     },
   }),
 
@@ -558,6 +609,175 @@ export const server = {
       }
       const id = createPost(input.title.trim(), input.body.trim(), adminId);
       return { url: `/dashboard/posts/${id}` };
+    },
+  }),
+
+  // -------------------------------------------------------------------------
+  // Lembur: pengajuan pegawai & keputusan admin.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Ajukan lembur. Ambang menit dihitung ulang di sini — tombol yang terkunci di klien
+   * hanya hiasan, aksi ini yang jadi pagar.
+   */
+  submitOvertime: defineAction({
+    input: z.object({
+      tanggal: z.string().max(10),
+      jam_mulai: z.string().max(5),
+      jam_selesai: z.string().max(5),
+      keterangan: z.string().max(2000),
+    }),
+    handler: async (input, context) => {
+      const userId = await currentUserId(context);
+      const session = await getSession(context.request);
+      if (session?.user?.role === 0) {
+        throw new ActionError({ code: "FORBIDDEN", message: "Admin tidak mengajukan lembur." });
+      }
+
+      const settings = getOvertimeSettings();
+      const done = completedMinutesToday(userId);
+      if (done < settings.min_minutes) {
+        throw new ActionError({
+          code: "FORBIDDEN",
+          message: `Selesaikan tugas minimal ${settings.min_minutes} menit hari ini dulu.`,
+        });
+      }
+
+      const parsed = parseOvertimeValues(input);
+      if ("error" in parsed) {
+        throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
+      }
+
+      const result = createOvertimeRequest(userId, parsed.value);
+      if (result === "duplicate") {
+        throw new ActionError({
+          code: "CONFLICT",
+          message: "Sudah ada pengajuan lembur yang menunggu untuk hari ini.",
+        });
+      }
+      return { result };
+    },
+  }),
+
+  /** Tarik pengajuan sendiri selama masih menunggu. */
+  cancelOvertime: defineAction({
+    input: z.object({ id: z.number().int().positive() }),
+    handler: async (input, context) => {
+      const userId = await currentUserId(context);
+      if (!cancelOvertimeRequest(input.id, userId)) {
+        throw new ActionError({ code: "NOT_FOUND", message: "Pengajuan ini tidak bisa dibatalkan." });
+      }
+      return {};
+    },
+  }),
+
+  /** Setujui atau tolak satu pengajuan. Hanya baris yang masih menunggu. */
+  decideOvertime: defineAction({
+    input: z.object({
+      id: z.number().int().positive(),
+      decision: z.enum(["disetujui", "ditolak"]),
+      catatan: z.string().max(500),
+    }),
+    handler: async (input, context) => {
+      const adminId = await currentAdminId(context);
+      if (!handleOvertimeRequest(input.id, adminId, input.decision, input.catatan)) {
+        throw new ActionError({ code: "CONFLICT", message: "Pengajuan ini sudah ditangani." });
+      }
+      return {};
+    },
+  }),
+
+  /** Setelan ambang pengajuan & batas diam. */
+  saveOvertimeSettings: defineAction({
+    input: z.object({
+      minMinutes: z.number().int().min(1).max(1440),
+      expireMinutes: z.number().int().min(15).max(1440),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      saveOvertimeSettings(input.minMinutes, input.expireMinutes);
+      return {};
+    },
+  }),
+
+  // -------------------------------------------------------------------------
+  // Absensi: absen masuk/pulang oleh pegawai, geofence diatur admin.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Catat absen masuk atau pulang. Tanggal, jam, jarak dan IP ditentukan server — klien
+   * hanya mengirim koordinat mentah dan akurasi yang dilaporkan browsernya. Tombol yang
+   * terkunci di klien hanya hiasan; tindakan ini yang jadi pagar.
+   */
+  checkAttendance: defineAction({
+    input: z.object({
+      kind: z.enum(["masuk", "pulang"]),
+      latitude: z.number(),
+      longitude: z.number(),
+      accuracy_m: z.number(),
+    }),
+    handler: async (input, context) => {
+      const userId = await currentUserId(context);
+      const session = await getSession(context.request);
+      if (session?.user?.role === 0) {
+        throw new ActionError({ code: "FORBIDDEN", message: "Admin tidak melakukan absensi." });
+      }
+
+      const parsed = parseCheckValues(input);
+      if ("error" in parsed) throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
+
+      const today = todayIso();
+      const state = attendanceState(userId, today);
+      const verdict = judgeAttendance({
+        ...parsed.value,
+        office: getAttendanceLocation(),
+        hasCheckedIn: state.hasCheckedIn,
+        alreadyRecorded: state.alreadyRecorded(parsed.value.kind),
+      });
+      if ("error" in verdict) throw new ActionError({ code: "BAD_REQUEST", message: verdict.error });
+
+      const headers = context.request.headers;
+      const forwarded = headers.get("x-forwarded-for")?.split(",")[0];
+      const ip = (forwarded ?? headers.get("x-real-ip") ?? "127.0.0.1").trim();
+
+      const recorded = createAttendanceLog(userId, today, {
+        kind: parsed.value.kind,
+        latitude: parsed.value.latitude,
+        longitude: parsed.value.longitude,
+        accuracy_m: parsed.value.accuracy_m,
+        distance_m: verdict.distance,
+        location_label: verdict.location.label,
+        ip,
+        user_agent: (headers.get("user-agent") ?? "").slice(0, 400),
+      });
+      // The UNIQUE index is the real fence: a double submit loses here, not in JS.
+      if (!recorded) {
+        throw new ActionError({
+          code: "CONFLICT",
+          message: parsed.value.kind === "masuk" ? "Anda sudah absen masuk hari ini." : "Anda sudah absen pulang hari ini.",
+        });
+      }
+      return { result: "created", location: verdict.location.label, distance: verdict.distance };
+    },
+  }),
+
+  /**
+   * Simpan titik lokasi absensi. Satu kantor saja: baris kedua tidak pernah dibuat, jadi
+   * aksi ini membuat atau menimpa titik yang sama.
+   */
+  saveAttendanceLocation: defineAction({
+    input: z.object({
+      label: z.string().max(100),
+      latitude: z.number(),
+      longitude: z.number(),
+      radius_m: z.number(),
+    }),
+    handler: async (input, context) => {
+      await currentAdminId(context);
+      const parsed = parseLocationValues(input);
+      if ("error" in parsed) throw new ActionError({ code: "BAD_REQUEST", message: parsed.error });
+      saveAttendanceLocation(parsed.value);
+      return {};
     },
   }),
 };

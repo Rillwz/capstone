@@ -1,5 +1,5 @@
 ---
-// Lonceng "Pekerjaan masuk" sebagai modal.
+// Lonceng notifikasi (pekerjaan masuk + hasil lembur) sebagai modal.
 //
 // Lonceng di header membuka dialog ini di tempat, jadi daftarnya bisa dibaca dari
 // halaman mana pun tanpa kehilangan posisi scroll. Daftarnya penugasan yang belum
@@ -11,17 +11,22 @@
 // NoteDialog.
 import { Bell, Check, Inbox, User, XMark } from "../../lib/icons";
 import Button from "../ui/Button.astro";
+import OvertimeStatus from "../ui/OvertimeStatus.astro";
 import { findCategory } from "../../lib/categories";
-import { formatDateTime } from "../../lib/format";
-import type { NewAssignment } from "../../lib/db";
+import { formatDate, formatDateTime, formatMinutes } from "../../lib/format";
+import { overtimeMinutes } from "../../lib/overtime";
+import type { NewAssignment, OvertimeRow } from "../../lib/db";
 
 interface Props {
   items: NewAssignment[];
+  /** Keputusan lembur yang belum dilihat pemohon. */
+  overtime?: OvertimeRow[];
   /** Dibuka dari server (?inbox=1) — jalur tanpa JavaScript. */
   open?: boolean;
 }
 
-const { items, open = false } = Astro.props;
+const { items, overtime = [], open = false } = Astro.props;
+const total = items.length + overtime.length;
 ---
 
 <dialog
@@ -37,11 +42,9 @@ const { items, open = false } = Astro.props;
         <Bell class="size-4" />
       </span>
       <div class="min-w-0 flex-1">
-        <h2 id="inbox-dialog-title" class="text-base font-semibold text-slate-900">Pekerjaan masuk</h2>
+        <h2 id="inbox-dialog-title" class="text-base font-semibold text-slate-900">Notifikasi</h2>
         <p data-inbox-summary class="mt-0.5 text-xs text-slate-500">
-          {items.length > 0
-            ? `${items.length} penugasan baru untuk Anda.`
-            : "Tidak ada penugasan baru."}
+          {total > 0 ? `${total} notifikasi baru untuk Anda.` : "Tidak ada notifikasi baru."}
         </p>
       </div>
       <button
@@ -54,63 +57,92 @@ const { items, open = false } = Astro.props;
       </button>
     </header>
 
-    <ul
-      data-inbox-list
-      hidden={items.length === 0}
-      class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain"
-    >
-      {
-        items.map((item) => {
-          const category = findCategory(item.category_id);
-          const UnitIcon = category?.icon ?? Inbox;
-          return (
-            <li class="flex items-start gap-3 px-5 py-3.5">
-              <UnitIcon class="mt-0.5 size-4 shrink-0 text-slate-400" />
-              <div class="min-w-0 flex-1">
-                <p class="text-sm leading-snug font-medium break-words text-slate-900">{item.name}</p>
-                <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{item.periode}</span>
-                  <span class="min-w-0 truncate">{category?.label ?? item.category_id}</span>
-                  <span aria-hidden="true" class="text-slate-300">·</span>
-                  <span>{formatDateTime(item.created_at)}</span>
-                </p>
-                {item.giver_name && (
-                  <p class="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-500">
-                    <User class="size-3.5 shrink-0 text-slate-400" />
-                    <span class="shrink-0">Dari</span>
-                    <span class="min-w-0 truncate font-medium text-slate-600">{item.giver_name}</span>
-                    {item.giver_email && (
-                      <>
-                        <span aria-hidden="true" class="shrink-0 text-slate-300">·</span>
-                        <span class="min-w-0 truncate text-slate-400" title={item.giver_email}>
-                          {item.giver_email}
-                        </span>
-                      </>
-                    )}
+    <div data-inbox-body hidden={total === 0} class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <ul data-inbox-list hidden={items.length === 0} class="divide-y divide-slate-100">
+        {
+          items.map((item) => {
+            const category = findCategory(item.category_id);
+            const UnitIcon = category?.icon ?? Inbox;
+            return (
+              <li class="flex items-start gap-3 px-5 py-3.5">
+                <UnitIcon class="mt-0.5 size-4 shrink-0 text-slate-400" />
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm leading-snug font-medium break-words text-slate-900">{item.name}</p>
+                  <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{item.periode}</span>
+                    <span class="min-w-0 truncate">{category?.label ?? item.category_id}</span>
+                    <span aria-hidden="true" class="text-slate-300">·</span>
+                    <span>{formatDateTime(item.created_at)}</span>
                   </p>
-                )}
-              </div>
-            </li>
-          );
-        })
+                  {item.giver_name && (
+                    <p class="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                      <User class="size-3.5 shrink-0 text-slate-400" />
+                      <span class="shrink-0">Dari</span>
+                      <span class="min-w-0 truncate font-medium text-slate-600">{item.giver_name}</span>
+                      {item.giver_email && (
+                        <>
+                          <span aria-hidden="true" class="shrink-0 text-slate-300">·</span>
+                          <span class="min-w-0 truncate text-slate-400" title={item.giver_email}>
+                            {item.giver_email}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  )}
+                </div>
+              </li>
+            );
+          })
+        }
+      </ul>
+
+      {
+        overtime.length > 0 && (
+          <section data-overtime-list class="border-t border-slate-200">
+            <h3 class="bg-slate-50 px-5 py-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              Hasil pengajuan lembur
+            </h3>
+            <ul class="divide-y divide-slate-100">
+              {overtime.map((row) => (
+                <li class="flex items-start gap-3 px-5 py-3.5">
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm leading-snug font-medium text-slate-900">
+                      Lembur {formatDate(row.tanggal)} · {row.jam_mulai}–{row.jam_selesai}{" "}
+                      <span class="text-slate-500">({formatMinutes(overtimeMinutes(row.jam_mulai, row.jam_selesai))})</span>
+                    </p>
+                    <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                      <OvertimeStatus status={row.status} />
+                      <span>{row.handled_by_name ?? "Admin"}</span>
+                      <span aria-hidden="true" class="text-slate-300">·</span>
+                      <span>{row.handled_at ? formatDateTime(row.handled_at) : "–"}</span>
+                    </p>
+                    {row.catatan_admin && (
+                      <p class="mt-1 text-xs text-slate-600">{row.catatan_admin}</p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
       }
-    </ul>
+    </div>
 
     <div
       data-inbox-empty
-      hidden={items.length > 0}
+      hidden={total > 0}
       class="flex flex-col items-center gap-1.5 px-6 py-12 text-center"
     >
       <Inbox class="size-8 text-slate-300" />
       <p class="text-sm font-medium text-slate-900">Semua sudah dibaca</p>
-      <p class="text-sm text-slate-500">Penugasan baru akan muncul di sini.</p>
+      <p class="text-sm text-slate-500">Penugasan dan hasil lembur akan muncul di sini.</p>
     </div>
 
     <footer class="flex flex-col-reverse gap-2 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-end">
       <p data-inbox-error hidden role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
       <Button variant="outline" type="button" data-dialog-close>Tutup</Button>
       {
-        items.length > 0 && (
+        total > 0 && (
           // Fallback tanpa JavaScript: form biasa ke /user, yang menandai lalu kembali
           // ke halaman ini dengan dialognya terbuka dalam keadaan kosong.
           <form method="POST" action="/user" data-inbox-form>
@@ -140,7 +172,7 @@ const { items, open = false } = Astro.props;
     const trigger = document.querySelector<HTMLElement>("[data-inbox-open]");
     const summary = dialog.querySelector<HTMLElement>("[data-inbox-summary]");
     const errorBox = dialog.querySelector<HTMLElement>("[data-inbox-error]");
-    const list = dialog.querySelector<HTMLUListElement>("ul");
+    const body = dialog.querySelector<HTMLElement>("[data-inbox-body]");
 
     const open = () => {
       if (errorBox) errorBox.hidden = true;
@@ -179,7 +211,7 @@ const { items, open = false } = Astro.props;
       if (errorBox) errorBox.hidden = true;
       if (button) button.disabled = true;
 
-      const { error } = await actions.markAssignmentsSeen({});
+      const { error } = await actions.markNotificationsSeen({});
       if (button) button.disabled = false;
 
       if (error) {
@@ -193,9 +225,9 @@ const { items, open = false } = Astro.props;
       // Lonceng berhenti berdering, lalu dialognya berganti ke keadaan "kosong".
       clearBell();
       form.remove();
-      list?.setAttribute("hidden", "");
+      body?.setAttribute("hidden", "");
       dialog.querySelector<HTMLElement>("[data-inbox-empty]")?.removeAttribute("hidden");
-      if (summary) summary.textContent = "Tidak ada penugasan baru.";
+      if (summary) summary.textContent = "Tidak ada notifikasi baru.";
     });
 
     // Datang dari halaman tanpa JavaScript: dialognya sudah dirender terbuka. Dengan

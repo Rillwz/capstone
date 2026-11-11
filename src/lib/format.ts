@@ -16,8 +16,18 @@ export function formatDateTime(value: string): string {
   });
 }
 
-/** The date part of a stored datetime ("21 Okt 2026"), without the time. */
-export function formatDateOnly(value: string): string {
+/** Clock time only, "HH:MM" in Jakarta — what a CSV cell needs, nothing more. */
+export function formatClock(value: string): string {
+  // en-GB, not id-ID: the Indonesian locale separates hours with a dot ("13.05").
+  return parseDbDate(value).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Jakarta",
+  });
+}
+
+/** The date part of a stored datetime ("21 Okt 2026"), without the time. */export function formatDateOnly(value: string): string {
   return parseDbDate(value).toLocaleDateString("id-ID", {
     day: "numeric",
     month: "short",

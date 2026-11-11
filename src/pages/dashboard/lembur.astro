@@ -1,0 +1,232 @@
+---
+// Lembur — sisi admin. Satu antrean, satu keputusan: setujui atau tolak. Pengajuan yang
+// tidak disentuh dalam batas waktu ditolak otomatis oleh expireOvertimeRequests(), yang
+// berjalan setiap kali daftar ini dibaca.
+import { CalendarDays, CheckCircle, Clock, Cog6Tooth, XMark } from "../../lib/icons";
+import Button from "../../components/ui/Button.astro";
+import Input from "../../components/ui/Input.astro";
+import OvertimeStatus from "../../components/ui/OvertimeStatus.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireAdmin } from "../../lib/auth";
+import { getOvertimeSettings, listOvertimeRequests } from "../../lib/db";
+import { formatDate, formatDateTime, formatMinutes } from "../../lib/format";
+import { overtimeMinutes } from "../../lib/overtime";
+
+const session = await requireAdmin(Astro);
+if (session instanceof Response) return session;
+
+const settings = getOvertimeSettings();
+const rows = listOvertimeRequests();
+const pending = rows.filter((row) => row.status === "pending");
+const handled = rows.filter((row) => row.status !== "pending");
+---
+
+<DashboardLayout title="Lembur" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Pengajuan lembur</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Setujui atau tolak pengajuan pegawai. Yang tidak ditindaklanjuti dalam{" "}
+        {Math.round(settings.expire_minutes / 60)} jam ditolak otomatis.
+      </p>
+    </div>
+    {
+      pending.length > 0 && (
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">
+          <Clock class="size-4" />
+          {pending.length} menunggu
+        </span>
+      )
+    }
+  </div>
+
+  <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+    <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+      <Cog6Tooth class="size-4 text-slate-400" />
+      <h2 class="text-sm font-semibold text-slate-900">Setelan lembur</h2>
+    </header>
+    <form data-settings-form class="space-y-4 p-5">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <Input
+          label="Ambang pengajuan (menit)"
+          name="minMinutes"
+          type="number"
+          value={String(settings.min_minutes)}
+          required
+        />
+        <Input
+          label="Tolak otomatis setelah (menit)"
+          name="expireMinutes"
+          type="number"
+          value={String(settings.expire_minutes)}
+          required
+        />
+      </div>
+      <p data-settings-error hidden role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+      <div class="flex items-center justify-end">
+        <Button type="submit" variant="outline" size="sm" data-settings-submit>Simpan setelan</Button>
+      </div>
+    </form>
+  </section>
+
+  <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+    <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+      <h2 class="text-sm font-semibold text-slate-900">Menunggu tindakan</h2>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{pending.length}</span>
+    </header>
+
+    {
+      pending.length === 0 ? (
+        <div class="flex flex-col items-center gap-2 px-6 py-14 text-center">
+          <CalendarDays class="size-8 text-slate-300" />
+          <p class="text-sm font-medium text-slate-900">Tidak ada pengajuan</p>
+          <p class="max-w-sm text-sm text-slate-500">
+            Pengajuan baru muncul di sini setelah pegawai menyelesaikan cukup tugas hari ini.
+          </p>
+        </div>
+      ) : (
+        <ul class="divide-y divide-slate-100">
+          {pending.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4" data-reveal="fade">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-900">{row.name}</p>
+                <p class="truncate text-xs text-slate-500" title={row.email}>
+                  {row.email}
+                  {row.jabatan && ` · ${row.jabatan}`}
+                </p>
+                <p class="mt-1 text-sm text-slate-700">
+                  {formatDate(row.tanggal)} · {row.jam_mulai}–{row.jam_selesai}
+                  <span class="text-slate-500">({formatMinutes(overtimeMinutes(row.jam_mulai, row.jam_selesai))})</span>
+                </p>
+                {row.keterangan && <p class="mt-0.5 text-xs text-slate-500">{row.keterangan}</p>}
+                <p class="mt-0.5 text-xs text-slate-400">Diajukan {formatDateTime(row.created_at)}</p>
+              </div>
+
+              <div class="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:items-end">
+                <label for={`catatan-${row.id}`} class="sr-only">Catatan untuk {row.name}</label>
+                <input
+                  id={`catatan-${row.id}`}
+                  name="catatan"
+                  maxlength="500"
+                  placeholder="Catatan (opsional)"
+                  data-overtime-note={row.id}
+                  class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-600 focus:outline-2 focus:outline-offset-0 focus:outline-brand-600 sm:w-64"
+                />
+                <div class="flex items-center gap-2">
+                  <Button variant="outline" size="sm" type="button" data-overtime-decide={row.id} data-decision="ditolak">
+                    <XMark class="size-4" />
+                    Tolak
+                  </Button>
+                  <Button size="sm" type="button" data-overtime-decide={row.id} data-decision="disetujui">
+                    <CheckCircle class="size-4" />
+                    Setujui
+                  </Button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+
+  {
+    handled.length > 0 && (
+      <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+        <header class="border-b border-slate-200 px-5 py-4">
+          <h2 class="text-sm font-semibold text-slate-900">Sudah ditangani</h2>
+        </header>
+        <ul class="divide-y divide-slate-100">
+          {handled.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5" data-reveal="fade">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium text-slate-900">
+                  {row.name} · {formatDate(row.tanggal)} · {row.jam_mulai}–{row.jam_selesai}
+                </span>
+                <span class="block truncate text-xs text-slate-500">{row.email}</span>
+                {row.catatan_admin && <span class="mt-0.5 block text-xs text-slate-600">{row.catatan_admin}</span>}
+              </span>
+              <span class="text-right text-xs text-slate-500">
+                <OvertimeStatus status={row.status} />
+                <span class="mt-1 block">
+                  {row.handled_by_name ?? "Admin"} · {row.handled_at ? formatDateTime(row.handled_at) : "–"}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</DashboardLayout>
+
+<script>
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
+
+  // Decisions are delegated once, because the list is re-rendered by refreshPage().
+  let decidedWired = false;
+
+  const init = () => {
+    const settingsForm = document.querySelector<HTMLFormElement>("[data-settings-form]");
+    const settingsError = document.querySelector<HTMLElement>("[data-settings-error]");
+
+    if (settingsForm && !settingsForm.dataset.wired) {
+      settingsForm.dataset.wired = "1";
+      settingsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = new FormData(settingsForm);
+        const button = settingsForm.querySelector<HTMLButtonElement>("[data-settings-submit]");
+        if (settingsError) settingsError.hidden = true;
+        if (button) button.disabled = true;
+
+        const { error } = await actions.saveOvertimeSettings({
+          minMinutes: Number(data.get("minMinutes")),
+          expireMinutes: Number(data.get("expireMinutes")),
+        });
+
+        if (button) button.disabled = false;
+
+        if (error) {
+          if (settingsError) {
+            settingsError.textContent = error.message || "Setelan gagal disimpan.";
+            settingsError.hidden = false;
+          }
+          return;
+        }
+        await refreshPage();
+        toast("Setelan lembur disimpan.");
+      });
+    }
+
+    if (decidedWired) return;
+    decidedWired = true;
+
+    document.addEventListener("click", async (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-overtime-decide]");
+      if (!button || button.disabled) return;
+
+      const id = Number(button.dataset.overtimeDecide);
+      const decision = button.dataset.decision === "disetujui" ? "disetujui" : "ditolak";
+      const note = document.querySelector<HTMLInputElement>(`[data-overtime-note="${id}"]`);
+
+      button.disabled = true;
+      const { error } = await actions.decideOvertime({
+        id,
+        decision,
+        catatan: note?.value ?? "",
+      });
+      button.disabled = false;
+
+      if (error) {
+        toast(error.message || "Keputusan gagal disimpan.", "error");
+        return;
+      }
+      await refreshPage();
+      toast(decision === "disetujui" ? "Lembur disetujui." : "Lembur ditolak.", decision === "disetujui" ? "success" : "info");
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

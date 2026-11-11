@@ -1,0 +1,246 @@
+---
+// Lembur — pengajuan dari pegawai. Form-nya hanya terbuka setelah cukup menit tugas
+// diselesaikan hari ini (ambang diatur admin), dan hasilnya masuk ke lonceng.
+import { CalendarDays, Clock, InformationCircle, LockClosed } from "../../lib/icons";
+import Button from "../../components/ui/Button.astro";
+import Input from "../../components/ui/Input.astro";
+import OvertimeStatus from "../../components/ui/OvertimeStatus.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireUser } from "../../lib/auth";
+import { completedMinutesToday, getOvertimeSettings, listOwnOvertimeRequests } from "../../lib/db";
+import { formatDate, formatDateTime, formatMinutes } from "../../lib/format";
+import { OVERTIME_NOTE_MAX, overtimeMinutes } from "../../lib/overtime";
+import { todayIso } from "../../lib/tasks";
+
+const session = await requireUser(Astro);
+if (session instanceof Response) return session;
+
+const userId = Number(session.user!.id);
+if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequired");
+
+const today = todayIso();
+const settings = getOvertimeSettings();
+const done = completedMinutesToday(userId);
+const canSubmit = done >= settings.min_minutes;
+const remaining = Math.max(0, settings.min_minutes - done);
+
+const rows = listOwnOvertimeRequests(userId);
+const pending = rows.filter((row) => row.status === "pending");
+const handled = rows.filter((row) => row.status !== "pending");
+const progress = Math.min(100, Math.round((done / settings.min_minutes) * 100));
+---
+
+<DashboardLayout title="Lembur" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Pengajuan lembur</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        Ajukan lembur untuk hari ini; admin yang menyetujui. Hasilnya muncul di lonceng.
+      </p>
+    </div>
+    {
+      pending.length > 0 && (
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">
+          <Clock class="size-4" />
+          {pending.length} menunggu
+        </span>
+      )
+    }
+  </div>
+
+  {
+    canSubmit ? (
+      <section class="mt-6 rounded-xl border border-slate-200 bg-white" data-reveal="up">
+        <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+          <h2 class="text-sm font-semibold text-slate-900">Ajukan lembur</h2>
+          <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+            {formatMinutes(done)} tugas selesai hari ini
+          </span>
+        </header>
+
+        <form data-overtime-form class="space-y-4 p-5">
+          <input type="hidden" name="tanggal" value={today} />
+          <div class="grid gap-4 sm:grid-cols-3">
+            <Input label="Jam mulai" name="jam_mulai" type="time" required />
+            <Input label="Jam selesai" name="jam_selesai" type="time" required />
+            <Input label="Tanggal" name="tanggal_display" type="date" value={today} disabled />
+          </div>
+          <Input label="Keterangan pekerjaan" name="keterangan" placeholder="Mis. menyiapkan laporan triwulan" />
+          <p data-overtime-error hidden role="alert" class="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+          <div class="flex items-center justify-end gap-2">
+            <Button type="submit" data-overtime-submit>
+              <CalendarDays class="size-4" />
+              Ajukan lembur
+            </Button>
+          </div>
+        </form>
+      </section>
+    ) : (
+      <section class="mt-6 rounded-xl border border-slate-200 bg-white p-5" data-reveal="up">
+        <div class="flex items-start gap-3">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500">
+            <LockClosed class="size-4" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-sm font-semibold text-slate-900">Form lembur masih terkunci</h2>
+            <p class="mt-1 text-sm text-slate-500">
+              Selesaikan tugas minimal {formatMinutes(settings.min_minutes)} hari ini dulu.
+              Kurang {formatMinutes(remaining)} lagi.
+            </p>
+            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div class="h-full rounded-full bg-brand-600" style={`width:${progress}%`}></div>
+            </div>
+            <p class="mt-1.5 text-xs text-slate-500">
+              {formatMinutes(done)} dari {formatMinutes(settings.min_minutes)}
+            </p>
+            <a href="/user" class="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+              <Clock class="size-4" />
+              Buka daftar tugas
+            </a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+    <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+      <h2 class="text-sm font-semibold text-slate-900">Menunggu persetujuan</h2>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{pending.length}</span>
+    </header>
+
+    {
+      pending.length === 0 ? (
+        <div class="flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <CalendarDays class="size-8 text-slate-300" />
+          <p class="text-sm font-medium text-slate-900">Tidak ada pengajuan menunggu</p>
+          <p class="max-w-sm text-sm text-slate-500">
+            Pengajuan yang belum diputuskan admin akan tampil di sini.
+          </p>
+        </div>
+      ) : (
+        <ul class="divide-y divide-slate-100">
+          {pending.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4" data-reveal="fade">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-slate-900">
+                  {formatDate(row.tanggal)} · {row.jam_mulai}–{row.jam_selesai}
+                  <span class="text-slate-500">({formatMinutes(overtimeMinutes(row.jam_mulai, row.jam_selesai))})</span>
+                </p>
+                {row.keterangan && <p class="mt-0.5 text-xs text-slate-500">{row.keterangan}</p>}
+                <p class="mt-0.5 text-xs text-slate-400">Diajukan {formatDateTime(row.created_at)}</p>
+              </div>
+              <Button variant="danger" size="sm" type="button" data-overtime-cancel={row.id}>
+                Batalkan
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+
+  {
+    handled.length > 0 && (
+      <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+        <header class="border-b border-slate-200 px-5 py-4">
+          <h2 class="text-sm font-semibold text-slate-900">Riwayat</h2>
+        </header>
+        <ul class="divide-y divide-slate-100">
+          {handled.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5" data-reveal="fade">
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-medium text-slate-900">
+                  {formatDate(row.tanggal)} · {row.jam_mulai}–{row.jam_selesai}
+                  <span class="font-normal text-slate-500">
+                    ({formatMinutes(overtimeMinutes(row.jam_mulai, row.jam_selesai))})
+                  </span>
+                </span>
+                {row.catatan_admin && <span class="mt-0.5 block text-xs text-slate-600">{row.catatan_admin}</span>}
+                <span class="mt-0.5 block text-xs text-slate-400">
+                  {row.handled_by_name ?? "Admin"} · {row.handled_at ? formatDateTime(row.handled_at) : "–"}
+                </span>
+              </span>
+              <OvertimeStatus status={row.status} />
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <p class="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+    <InformationCircle class="size-3.5 shrink-0 text-slate-400" />
+    Pengajuan yang tidak ditindaklanjuti dalam {Math.round(settings.expire_minutes / 60)} jam
+    ditolak otomatis. Keterangan maksimal {OVERTIME_NOTE_MAX}{" "}karakter.
+  </p>
+</DashboardLayout>
+
+<script>
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
+
+  // The router swaps the DOM but keeps this module, so the form is wired again on every
+  // astro:page-load. The cancel buttons are delegated once (module scope, not an element
+  // attribute — the router replaces <html> attributes): they are re-rendered too, and a
+  // per-button listener would go stale after refreshPage().
+  let cancelWired = false;
+
+  const init = () => {
+    const form = document.querySelector<HTMLFormElement>("[data-overtime-form]");
+    const errorBox = document.querySelector<HTMLElement>("[data-overtime-error]");
+
+    if (form && !form.dataset.wired) {
+      form.dataset.wired = "1";
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = new FormData(form);
+        const button = form.querySelector<HTMLButtonElement>("[data-overtime-submit]");
+        if (errorBox) errorBox.hidden = true;
+        if (button) button.disabled = true;
+
+        const { error } = await actions.submitOvertime({
+          tanggal: String(data.get("tanggal") ?? ""),
+          jam_mulai: String(data.get("jam_mulai") ?? ""),
+          jam_selesai: String(data.get("jam_selesai") ?? ""),
+          keterangan: String(data.get("keterangan") ?? ""),
+        });
+
+        if (button) button.disabled = false;
+
+        if (error) {
+          // Validation belongs next to the fields, not in a toast outside the form.
+          if (errorBox) {
+            errorBox.textContent = error.message || "Pengajuan gagal dikirim.";
+            errorBox.hidden = false;
+          }
+          return;
+        }
+
+        await refreshPage();
+        toast("Pengajuan lembur terkirim. Menunggu persetujuan admin.");
+      });
+    }
+
+    if (cancelWired) return;
+    cancelWired = true;
+
+    document.addEventListener("click", async (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-overtime-cancel]");
+      if (!button || button.disabled) return;
+      button.disabled = true;
+
+      const { error } = await actions.cancelOvertime({ id: Number(button.dataset.overtimeCancel) });
+      if (error) {
+        button.disabled = false;
+        toast(error.message || "Pengajuan gagal dibatalkan.", "error");
+        return;
+      }
+      await refreshPage();
+      toast("Pengajuan lembur dibatalkan.", "info");
+    });
+  };
+
+  document.addEventListener("astro:page-load", init);
+  init();
+</script>

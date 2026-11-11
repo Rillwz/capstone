@@ -9,7 +9,7 @@ interface Props {
   name: string;
   /** Menimpa id bawaan `field-<name>` — dipakai bila satu halaman punya dua field bernama sama. */
   id?: string;
-  type?: "text" | "email" | "password" | "number" | "tel" | "url" | "date";
+  type?: "text" | "email" | "password" | "number" | "tel" | "url" | "date" | "time";
   placeholder?: string;
   value?: string;
   required?: boolean;
@@ -17,6 +17,8 @@ interface Props {
   error?: string;
   /** Numeric keypad on phones, without the number-input stepper arrows. */
   inputmode?: "numeric";
+  /** `type="number"` defaults to step 1, which rejects decimals — pass "any" for coordinates. */
+  step?: string;
   class?: string;
 }
 
@@ -31,6 +33,7 @@ const {
   disabled,
   error,
   inputmode,
+  step,
   class: className,
 } = Astro.props;
 const id = idProp ?? `field-${name}`;
@@ -53,6 +56,7 @@ const isPassword = type === "password";
       aria-invalid={error ? "true" : undefined}
       aria-describedby={error ? `${id}-error` : undefined}
       inputmode={inputmode}
+      step={step}
       class:list={[
         "h-11 w-full rounded-lg border bg-white px-3.5 text-sm text-slate-900 placeholder:text-slate-400",
         "disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500",

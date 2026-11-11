@@ -3,14 +3,22 @@
 // sidebar beside the content; below lg the same list slides in from the header trigger
 // (SidebarMenu), so there is one source for the nav either way. Only the list and the
 // brand link differ per role.
-import { Bell, Squares2x2, ArrowRightOnRectangle, Newspaper, Tag, ClipboardDocumentCheck, Clock, User, Users, Bolt, Key } from "../lib/icons";
+import { Bell, Squares2x2, ArrowRightOnRectangle, Newspaper, Tag, ClipboardDocumentCheck, Clock, User, Users, Bolt, Key, CalendarDays, MapPin } from "../lib/icons";
 import SidebarMenu from "../components/admin/SidebarMenu.astro";
 import SidebarNav from "../components/admin/SidebarNav.astro";
 import DockToggle from "../components/admin/DockToggle.astro";
 import InboxDialog from "../components/user/InboxDialog.astro";
 import ThemeToggle from "../components/ui/ThemeToggle.astro";
 import ToastRegion from "../components/ui/ToastRegion.astro";
-import { countPendingPasswordResets, listNewAssignments } from "../lib/db";
+import {
+  countAttendanceMissing,
+  getAttendanceLocation,
+  countPendingOvertime,
+  countPendingPasswordResets,
+  listNewAssignments,
+  listUnseenOvertimeResults,
+} from "../lib/db";
+import { todayIso } from "../lib/tasks";
 import Layout from "./Layout.astro";
 
 interface Props {
@@ -27,21 +35,36 @@ const isAdmin = user?.role === 0;
 // Daftarnya ikut dibaca di sini supaya dialognya berfungsi dari halaman mana pun.
 const userId = Number(user?.id);
 const inbox = !isAdmin && Number.isInteger(userId) ? listNewAssignments(userId) : [];
-const unseen = inbox.length;
-const unseenLabel = `Pekerjaan masuk: ${unseen} belum dibaca`;
+const overtimeResults = !isAdmin && Number.isInteger(userId) ? listUnseenOvertimeResults(userId) : [];
+// Angkanya diturunkan dari dua daftar yang dirender dialognya, jadi tidak ada hitungan
+// terpisah yang bisa melenceng dari isi lonceng.
+const unseen = inbox.length + overtimeResults.length;
+const unseenLabel = `Notifikasi: ${unseen} belum dibaca`;
 
 // Notifikasi "Lupa kata sandi" — hanya admin yang punya halaman permintaan reset.
 // Dihitung di sini, seperti lonceng, supaya setiap halaman admin ikut menampilkannya.
 const pendingResets = isAdmin ? countPendingPasswordResets() : 0;
+const pendingOvertime = isAdmin ? countPendingOvertime() : 0;
+// Siapa yang belum absen hari ini — angka saja, isinya di halaman absensi. Selama titik
+// kantor belum diatur, badge-nya 0: fitur yang belum dikonfigurasi tidak boleh jadi nag.
+const missingAttendance =
+  isAdmin && getAttendanceLocation() ? countAttendanceMissing(todayIso()) : 0;
 
 const nav = isAdmin
   ? [
       { href: "/dashboard", label: "Dashboard", icon: Squares2x2 },
       { href: "/dashboard/assignments", label: "Penugasan", icon: ClipboardDocumentCheck },
+      { href: "/dashboard/absensi", label: "Absensi", icon: MapPin, badge: missingAttendance },
       { href: "/instruksi", label: "Instruksi", icon: Bolt },
       { href: "/dashboard/posts", label: "Postingan", icon: Newspaper },
       { href: "/dashboard/categories", label: "Kategori", icon: Tag },
       { href: "/dashboard/users", label: "Pengguna", icon: Users },
+      {
+        href: "/dashboard/lembur",
+        label: "Lembur",
+        icon: CalendarDays,
+        badge: pendingOvertime,
+      },
       {
         href: "/dashboard/permintaan-reset",
         label: "Reset",
@@ -52,8 +75,10 @@ const nav = isAdmin
     ]
   : [
       { href: "/user", label: "Dashboard", icon: Squares2x2 },
+      { href: "/user/absensi", label: "Absensi", icon: MapPin },
       // Hanya atasan (level 1) yang boleh memberi instruksi.
       ...(user?.role === 1 ? [{ href: "/user/penugasan", label: "Instruksi", icon: ClipboardDocumentCheck }] : []),
+      { href: "/user/lembur", label: "Lembur", icon: CalendarDays },
       { href: "/user/riwayat", label: "Riwayat", icon: Clock },
       { href: "/profile", label: "Profil", icon: User },
     ];
@@ -90,8 +115,8 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
                 aria-haspopup="dialog"
                 aria-controls="inbox-dialog"
                 aria-expanded="false"
-                aria-label={unseen > 0 ? unseenLabel : "Pekerjaan masuk"}
-                title={unseen > 0 ? unseenLabel : "Pekerjaan masuk"}
+                aria-label={unseen > 0 ? unseenLabel : "Notifikasi"}
+                title={unseen > 0 ? unseenLabel : "Notifikasi"}
                 class="relative grid size-9 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
               >
                 <Bell class="size-4" />
@@ -142,9 +167,17 @@ const items = nav.map((item) => ({ ...item, active: isActive(item.href) }));
     </div>
   </div>
 
-  <!-- Dialog "Pekerjaan masuk": satu-satunya isi lonceng, dipakai semua halaman.
-       ?inbox=1 membukanya dari server untuk jalur tanpa JavaScript. -->
-  {!isAdmin && <InboxDialog items={inbox} open={Astro.url.searchParams.get("inbox") === "1"} />}
+  <!-- Dialog notifikasi (pekerjaan masuk + hasil lembur): isi lonceng, dipakai semua
+       halaman. ?inbox=1 membukanya dari server untuk jalur tanpa JavaScript. -->
+  {
+    !isAdmin && (
+      <InboxDialog
+        items={inbox}
+        overtime={overtimeResults}
+        open={Astro.url.searchParams.get("inbox") === "1"}
+      />
+    )
+  }
 
   <!-- Satu tumpukan toast untuk seluruh area; src/scripts/toast.ts mengisinya. -->
   <ToastRegion />

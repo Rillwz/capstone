@@ -31,7 +31,8 @@ npx astro build
 
 SQLite at `data/app.db` (`src/lib/db.ts` owns the schema and every query).
 Tables: `users`, `positions`, `posts`, `login_logs`, `activities`, `assignments`,
-`activity_logs`, `occurrence_notes`, `password_reset_requests`.
+`activity_logs`, `occurrence_notes`, `password_reset_requests`, `overtime_requests`,
+`overtime_settings`.
 
 `password_reset_requests` is the "Lupa kata sandi" queue. There is no token and no email:
 `/lupa-sandi` only records that an account asked; `/dashboard/permintaan-reset` (menu
@@ -53,10 +54,150 @@ without a diff.
 undo, and it may exist on a task that is still open. Notes are keyed by
 `(user_id, activity_id, period_key)`.
 
+`overtime_requests` holds "Pengajuan Lembur". One row = one request for one civil date
+(`tanggal`, `YYYY-MM-DD`); duration is derived from `jam_mulai`/`jam_selesai` at render
+time by `overtimeMinutes()`, never stored. Status is only `pending` / `disetujui` /
+`ditolak` — there is **one** approval step (admin), deliberately: adding a second tier
+needs a `step` column plus a filter in `handleOvertimeRequest`, not a new system.
+`catatan_admin` carries the rejection reason or the approval note. A partial unique index
+(`(user_id, tanggal) WHERE status = 'pending'`) stops a double-click from filing two rows;
+a decided row frees the date again.
+
+Requests only accept **today**: the form is gated on today's work, so another date has no
+basis. No overnight shifts — `jam_selesai` must be later than `jam_mulai`.
+
+`overtime_settings` is a single row (`CHECK (id = 1)`), so no query has to pick "the
+latest": `min_minutes` (default 60) is the completed-minutes threshold that unlocks the
+form, `expire_minutes` (default 180) the silence limit before auto-reject. Both are edited
+on `/dashboard/lembur`.
+
+Auto-reject has no scheduler. `expireOvertimeRequests()` runs at the top of every overtime
+read and stamps `handled_at = datetime(created_at, '+<expire> minutes')` — the deadline is
+deterministic, so a sweep that runs five hours later reaches the same verdict; only the
+write is late. Same shape as `materializeOverdue()`.
+
+The gate is `completedMinutesToday(userId)`: the sum of `activities.minutes` over
+`activity_logs` rows completed today (Jakarta), re-checked inside the `submitOvertime`
+action — the disabled form is decoration, the action is the fence. Caveat: work finished
+before midnight and filed at 00:30 lands in yesterday's bucket and is refused.
+
+The bell is one panel, two sources: unseen assignments plus **every** decided overtime row
+(`seen_at IS NULL`), so an approval is announced too, not just a rejection.
+`InboxDialog` is titled "Notifikasi" and `markNotificationsSeen` closes both at once.
+
 `positions` is the Posisi/Jabatan list behind the dropdown on `/dashboard/users` (unique
 label, case-insensitive via `idx_positions_label`). `users.jabatan` stores the label text
 itself, not a foreign key: renaming a position updates the matching accounts, deleting one
 leaves them with the text they already had. It is not part of the session token.
+
+## Absensi (geolocation attendance)
+
+One office, one point. `attendance_location` is a singleton (`CHECK (id = 1)`, the same
+pattern as `overtime_settings`): label, `latitude`/`longitude`, and `radius_m` (CHECK
+10–300). `saveAttendanceLocation` is an upsert on `id = 1`, so there is no add/edit/retire
+flow and no `active` flag. `attendance_logs` is one row **per event**, not per day: `kind`
+is `masuk` or `pulang`, and each row carries its own coordinates, `accuracy_m`,
+server-computed `distance_m`, `location_label`, plus `ip` / `user_agent`. `UNIQUE (user_id,
+tanggal, kind)` is the real fence against a double submit — the action inserts with
+`INSERT OR IGNORE` and reports `CONFLICT`, it does not pre-check in JS. `tanggal` is the
+Jakarta civil date; the time of day is `created_at`.
+
+`location_label` is a **copy** of the office name at the moment of the event, not a foreign
+key. Renaming the office never rewrites history, and there is no join to maintain.
+
+`src/lib/attendance.ts` holds the whole decision and no DB: `haversineMeters`,
+`circlePolygon`, `distanceFromOffice`, `parseCheckValues`, `parseLocationValues`, and
+`judgeAttendance`. The page, the smart preview and the action use the same parser. The
+server never accepts a distance from the client — it recomputes from the raw pair.
+
+`judgeAttendance` order matters: no office → `pulang` without `masuk` → already recorded
+→ accuracy worse than `min(radius, 150)` → outside the radius. The radius is **not** widened
+by the reported accuracy: adding them would let a faker send accuracy 5000 and walk through.
+
+`/user/absensi` asks for the position only when a button is pressed (a permission prompt on
+page load is the fastest way to get "Block"). It shows the local distance before sending,
+but the server decides again. Without a secure origin (`http://192.168…`) the browser never
+returns a fix, so the page checks `window.isSecureContext` and says so instead of hanging.
+
+`/dashboard/absensi` is the **report** and `/dashboard/absensi/lokasi` is the **editor**.
+They were split on purpose: the report is driven by GET links (`?mode=…&q=…`), and every
+navigation re-mounts MapLibre; keeping the map on the same page meant a half-typed location
+form was thrown away each time the admin changed period. The report page does not load
+MapLibre at all.
+
+Three modes, all in the URL: `mode=harian|bulanan|tahunan` plus `tanggal` / `bulan` / `tahun`
+and `q`. `parseReportPeriod` (in `attendance.ts`, no DB) validates whatever the URL holds and
+falls back to today on garbage, so a hand-edited URL can never 500 the page. Only the key that
+belongs to the active mode is read or written. `shiftReportPeriod` moves one step in the
+mode's own unit — it does its own month and leap-year arithmetic, never `Date` month overflow.
+
+`q` filters **name, email, or jabatan in SQL**, not in the DOM (unlike `/dashboard/users`,
+whose list is the whole table). The LIKE pattern is escaped, so a typed `%` stays literal.
+The same `q` goes to the recap, the missing list, the summary, and the year grid; every link
+on the page carries it, otherwise changing period would silently drop the filter.
+
+Report queries: `listAttendanceRecap(tanggal, q)` and `listAttendanceMissing(tanggal, q)` for
+one day; `listAttendanceMissingRange(start, end, q)` and `listAttendanceSummary(start, end, q)`
+for a range; `listAttendanceMonthCells(start, end, q)` for the year grid (flat rows, pivoted
+in the page). The summary uses `LEFT JOIN` on purpose: an employee with zero rows must appear
+with `0`, because that is the case the monthly report exists to show. `days_out > days_in`
+cannot happen — the action refuses `pulang` without `masuk` on the same day.
+
+**No percentages.** The app has no working-day calendar, holidays, or leave records, so any
+"attendance %" would have an invented denominator. The pages show counted days, and
+"hari berjalan" as context only.
+
+The missing list is derived (`users` role ≠ 0 minus the `masuk` rows), not stored. Its nav
+badge is `countAttendanceMissing(todayIso())` — daily and unfiltered, whatever the page shows.
+
+### Export CSV
+
+`GET /dashboard/absensi/export?mode=…&tanggal=|bulan=|tahun=&q=…` returns the same data the
+page shows, as `text/csv`. It is a plain link in the report's period bar, so it works without
+JavaScript, keeps the period and filter, and lands in the download history. `requireAdmin`
+guards it — the CSV is admin data like the page is; a level 1/2 request is redirected, never
+served.
+
+Columns: daily = one row per employee **including the absentees** (`Status` = `Lengkap` /
+`Belum pulang` / `Tidak hadir`), monthly = per-employee totals, yearly = the 12-month grid.
+Nol is written `0`, not `·` — the file is meant to be calculated with.
+
+Format decisions, each deliberate:
+
+- **`;` separator + UTF-8 BOM.** That is what Excel in an Indonesian locale needs to open
+  straight into columns; a comma CSV would land in one column and accented names would mangle.
+  Google Sheets needs the separator set manually on import.
+- **`csvCell` prefixed with `'` for cells starting with `=`, `+`, `-`, `@`, tab or CR.** Names
+  and jabatan are admin-supplied text, i.e. a trust boundary — without this, Excel executes
+  them as formulas. Cells containing `;`, `"`, or a newline are quoted and `"` doubled.
+- **No metadata block.** Row 1 is the header, so the file parses and pivots cleanly. Period and
+  office are in the filename and the columns.
+- Meter values are rounded, clock times are `HH:MM` WIB via `formatClock` (en-GB on purpose:
+  `id-ID` writes `13.05`), nullable cells stay empty rather than `NaN`.
+
+`buildAttendanceCsv` in `attendance.ts` is pure — no DB, no clock, no request — so the whole
+format is covered by `check-attendance.ts` without an HTTP call. The endpoint only queries,
+builds, and sets the headers.
+
+### MapLibre
+
+`src/scripts/attendance-map.ts` is the only place that touches MapLibre. Tiles are
+OpenFreeMap styles (no key, no cost) picked from the theme: `liberty` light, `dark` dark,
+`positron` paper. The library is loaded with `await import()` so only the pages that draw a
+map pay for it (`/user/absensi` and `/dashboard/absensi/lokasi`); the built chunk is ~1.1 MB.
+
+Three gotchas, each already cost a debugging session:
+
+- **`optimizeDeps.exclude: ['maplibre-gl']` in `astro.config.mjs`.** MapLibre v6 loads its
+  worker from a real URL beside its own bundle; Vite's pre-bundling rewrites that path into
+  `deps/`, the worker 404s, and the map silently stays blank.
+- **`map.isStyleLoaded()` before `addSource`.** Drawing the fence circle before the style is
+  parsed throws `Style is not done loading`; `drawCircle()` queues itself on `load` instead.
+- **`map.remove()` on `astro:before-swap`.** `ClientRouter` keeps modules alive, so a map
+  that is not destroyed leaks a WebGL context and the tab dies after a few navigations.
+
+The radius is drawn as a GeoJSON polygon from `circlePolygon`, not as a pixel-radius
+circle: pixels lie about metres once you zoom.
 
 `assignments.seen_at` powers the "Pekerjaan masuk" inbox: `NULL` means the holder has not
 read it yet. The unit is the assignment, not its occurrences — a daily task must not ring
@@ -78,6 +219,18 @@ ever counts those rows.
 
 `assignments.created_by` is `ON DELETE SET NULL`, so deleting an account keeps the
 assignment and just drops the attribution.
+
+`assignments.archived_at` is the archive marker (`NULL` = active). Archiving is a soft
+delete: the row, its `occurrence_notes` and its `activity_logs` stay, but the assignment
+disappears from the holder's dashboard, the inbox bell, the Instruksi tracker, the missed
+panel and every coverage count. Restoring clears `archived_at`, resets `seen_at` and
+restarts `created_at` — periods are counted from the assignment date, so keeping the old
+date would revive the archived stretch as a pile of missed periods. Assigning the same
+activity again through the catalog revives the row instead of skipping it
+(`ON CONFLICT ... DO UPDATE ... WHERE archived_at IS NOT NULL`). "Hapus semua" only
+deletes active rows; permanent deletion is a separate action from the archive tab.
+`listHistory` and the contribution graph deliberately ignore the flag: what already
+happened stays on the record.
 
 Authorization for releasing a direct assignment is `created_by`-scoped: a level-1
 supervisor can only undo their own, never the admin's.
@@ -176,10 +329,22 @@ deprecated in Astro 7).
 
 Current actions: `completeTask`, `undoTask`, `saveNote`, `assignActivities`,
 `assignActivitiesToUsers` (bulk — many activities to many users, existing pairs skipped),
-`removeActivity`, `clearAssignments`, `markAssignmentsSeen` (marks the caller's own inbox —
-never takes a `userId` from the client), `createUserAccount`, `deleteUserAccount`,
-`saveActivity`, `deleteActivities`, `deletePost`, `savePost`, `createDirectAssignment`,
-`removeDirectAssignment`.
+`removeActivity`, `clearAssignments`, `archiveAssignment`, `restoreAssignment`,
+`markNotificationsSeen` (marks the caller's own bell — never takes a `userId` from the
+client), `createUserAccount`, `deleteUserAccount`, `saveActivity`, `deleteActivities`,
+`deletePost`, `savePost`, `createDirectAssignment`, `removeDirectAssignment`,
+`submitOvertime`, `cancelOvertime`, `decideOvertime`, `saveOvertimeSettings`,
+`checkAttendance`, `saveAttendanceLocation`.
+
+The attendance pair is split the same way: `checkAttendance` is `currentUserId` and refuses
+role 0 (admins do not clock in); `saveAttendanceLocation` is `currentAdminId` and upserts the
+single point. There is deliberately **no** action that deletes an attendance row — history
+that can be erased is not history.
+
+The overtime quad is split by trust: `submitOvertime` / `cancelOvertime` are
+`currentUserId` (a user files and withdraws only their own pending row, and the submit
+re-checks the minutes gate), `decideOvertime` / `saveOvertimeSettings` are
+`currentAdminId`.
 
 The direct-assignment pair is guarded by `currentAssigner` (role 0 **or** 1, else 403), not
 `currentAdminId`. Targets are re-filtered server-side to `role !== 0`; the dialog's list is
@@ -300,7 +465,12 @@ Jakarta day in JS) and the latest logins/posts.
 | `src/actions/index.ts` | every mutation |
 | `src/lib/notes.ts` | `parseNoteValues`, `parseNote`, `NOTE_MAX`, `linkLabel` |
 | `src/lib/activities.ts` | `parseActivityValues` (plain values), `parseActivity` (FormData) |
+| `src/lib/overtime.ts` | `parseOvertimeValues`, `overtimeMinutes`, `OVERTIME_NOTE_MAX` |
+| `src/pages/user/lembur.astro` | employee side: gate panel, request form, own history |
+| `src/pages/dashboard/lembur.astro` | admin side: settings card, queue, decided rows |
+| `src/components/ui/OvertimeStatus.astro` | status chip (pending / disetujui / ditolak) |
 | `src/lib/db.ts` | schema + queries, `taskStats()`, `undoOccurrence()`, `setOccurrenceNote()` |
+| `src/pages/dashboard/assignments.astro` | per-user assignments (catalog + bulk dialogs) and the `?arsip=1` archive tab |
 | `src/pages/user/penugasan.astro` | level-1 "Penugasan": direct assignments this supervisor gave, plus the dialog |
 | `src/pages/instruksi.astro` | admin "Instruksi": gives direct assignments (dialog lives here) and tracks their progress |
 | `src/components/GivenAssignments.astro` | shared tracker panel (summary counts, `?belum=1` filter, per-assignment cards) |
@@ -313,6 +483,12 @@ Jakarta day in JS) and the latest logins/posts.
 | `src/layouts/Layout.astro` | `html.js` marker, reveal safety net, `astro:after-swap` theme restore |
 | `src/components/admin/DockToggle.astro` | lg+ rail toggle for the docked menu |
 | `src/scripts/dock.ts` | rail state (`data-dock-mini`, `assignment-dock`) |
+| `src/lib/attendance.ts` | haversine, radius polygon, parsers, `judgeAttendance` |
+| `src/scripts/attendance-map.ts` | the only MapLibre door: mount, fences, `destroy()` |
+| `src/pages/user/absensi.astro` | employee: masuk/pulang, own history, map |
+| `src/pages/dashboard/absensi.astro` | admin report: daily/monthly/yearly + `q` filter |
+| `src/pages/dashboard/absensi/lokasi.astro` | admin editor: the single office point + map |
+| `src/pages/dashboard/absensi/export.ts` | CSV export route, mirrors the page's period + `q` |
 
 ## Conventions and gotchas
 
@@ -331,6 +507,32 @@ Jakarta day in JS) and the latest logins/posts.
 `bun run src/scripts/check-tasks.ts` is the engine self-check (period keys, due dates,
 past periods, date ranges) — run it after touching `src/lib/tasks.ts`; it exits non-zero on
 failure.
+
+`bun run src/scripts/check-attendance.ts` checks the attendance maths, the fence, the
+report-period parser, and the whole CSV format (haversine, circle polygon, parser edges,
+radius/accuracy decisions, mode fallbacks, month/leap-year stepping, cell escaping, formula
+injection, BOM, and the shape of each mode's file) with no DB at all.
+
+`bun run src/scripts/check-attendance-db.ts` covers the queries (upsert keeps one row, unique
+index, state, recap, missing list, the copied `location_label`, the `q` filter with LIKE
+escaping, the range summary including zero-day employees, and the year grid). It **writes to
+`data/app.db`** and the office is a singleton, so it namespaces every row `uji-absensi-…`, and
+restores the previous office point in a `finally`.
+
+The Playwright script for Absensi is `absensi-e2e.mjs` in
+`/private/var/folders/2x/7ht7gfv50yn3m_x0nw392mkc0000gn/T/opencode/absensi-check/` (it runs
+`node`, and shells into `bun -e` for fixtures). `context.setGeolocation` plus
+`grantPermissions(["geolocation"])` is the only way to test inside/outside radius without
+walking to the office. It covers masuk, a refused pulang from outside, a recorded pulang,
+both maps rendering, the report page not loading a map at all, the filter (including the
+no-match state and that it survives a mode change), the monthly and yearly tables, saving the
+single office point from its own route (and that a second save still leaves one row), the
+small-radius warning, the level-2 route guard **and** the action guard, and no horizontal
+overflow at 390px. `absensi-decimal.mjs` guards the decimal-coordinate regression on
+`/dashboard/absensi/lokasi`. `absensi-export.mjs` fetches all three export URLs and checks the
+status, headers, BOM **on the raw bytes** (`response.text()` strips it during decode), the
+column count, the filtered file, the garbage-URL fallback, that the page link carries the
+current period and `q`, and that a level-2 account is redirected instead of served a CSV.
 
 Playwright scripts live outside the repo in
 `/private/var/folders/2x/7ht7gfv50yn3m_x0nw392mkc0000gn/T/opencode/`
@@ -360,6 +562,13 @@ the "+N periode sebelumnya" label and the strip's width at 390px. `range-check.m
 the date range and the release confirmation: both forms' fields, `end_date < start_date`
 rejection, the deadline stopping recurrence, the release dialog's cancel/Esc/confirm paths,
 and a real no-JS release.
+
+`arsip-e2e.mjs` covers the assignment archive end to end: archive hides the task from the
+recipient's dashboard and bell without deleting the row, the `?arsip=1` tab reveals it,
+restore reactivates the row with a fresh `created_at`, permanent delete needs two clicks,
+"Hapus semua" leaves archived rows alone, and the page does not overflow at 390px. It
+creates `uji-arsip-*` accounts and removes them again (use a separate browser context for
+the employee — pages in one context share the session cookie).
 
 ## Instruksi (direct assignments)
 
@@ -478,8 +687,27 @@ same thing it did before — the day still anchors the monthly due date.
 - Done from the meeting agenda: master Posisi/Jabatan, dynamic kategori, Penugasan Massal,
   Notifikasi Pekerjaan Masuk, Instruksi, plus traceability ("Dari" on the
   recipient side) and the giver's progress tracker with the per-period timeline.
-- Still open: Red Notice for overdue work, Konsep Lembur (undecided), "konfirmasi selesai
-  oleh pegawai" — today a task is done the moment the employee ticks it, with no approval
+- Assignment archive (`assignments.archived_at`) shipped with the `?arsip=1` tab on
+  `/dashboard/assignments`; permanent delete lives only in that tab.
+- Lembur shipped as admin-approved requests (`/user/lembur` + `/dashboard/lembur`), gated
+  on today's completed minutes, with a 3-hour auto-reject and the decision announced
+  through the bell. Multi-tier approval and overtime recap/export are deliberately not
+  built yet.
+- Absensi shipped: `/user/absensi` (masuk/pulang from the office geofence) and the admin side
+  split in two — `/dashboard/absensi` is the report (harian/bulanan/tahunan, filter by name,
+  email, or jabatan, "belum absen" list, nav badge, CSV export) and `/dashboard/absensi/lokasi`
+  is the MapLibre point editor. The nav item stays "Absensi", so it lights up for both.
+  **One office point only** — the table is a singleton, so there is no add-location flow and
+  no `active` flag; the editor is a single form that upserts it. Radius 10–300 m; distance and
+  the accuracy gate are decided server-side. Each log copies the office name at the time of the
+  event.
+  Export is CSV only (`;` separated, UTF-8 BOM, formula-injection guarded); XLSX/PDF and an
+  employee-side export are deliberately not built.
+  Deliberately not built: lateness/working hours, shifts, selfie or QR proof,
+  attendance percentages (no working-day calendar), per-user location assignment, multiple
+  offices, and any action that deletes an attendance row.
+- Still open: Red Notice for overdue work, "konfirmasi selesai oleh pegawai" — today a
+  task is done the moment the employee ticks it, with no approval
   step.
 - Known follow-up: the Riwayat page's plain-form "Batalkan" button still causes a router
   re-render that jumps the scroll to the top — it can become an action like the rest.

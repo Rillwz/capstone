@@ -22,5 +22,9 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
     cacheDir,
+    // MapLibre v6 loads its worker from a real URL next to its own bundle. Vite's
+    // pre-bundling rewrites that path into deps/, where no worker exists, and the map
+    // silently never draws. Serving the package untouched keeps the URL valid.
+    optimizeDeps: { exclude: ['maplibre-gl'] },
   }
 });

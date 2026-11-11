@@ -7,6 +7,8 @@
 // Aksinya memakai Astro Action (src/actions) — assigning, melepas, dan mengosongkan
 // penugasan tidak memuat ulang halaman.
 import {
+  ArchiveBox,
+  ArrowPath,
   ClipboardDocumentCheck,
   ClipboardDocument,
   Plus,
@@ -21,8 +23,10 @@ import Button from "../../components/ui/Button.astro";
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { requireAdmin } from "../../lib/auth";
 import { listAllCategories, listCategories } from "../../lib/categories";
+import { formatDateOnly } from "../../lib/format";
 import {
   listActivityCatalog,
+  listArchivedActivitiesForUser,
   listAssignedActivitiesForUser,
   listAssignmentUsers,
   listUsers,
@@ -51,17 +55,31 @@ const assignedIds = new Set(catalog.filter((activity) => activity.assigned).map(
 // pengguna, jadi flag `assigned` selalu 0.
 const fullCatalog = listActivityCatalog(0);
 
+// Arsip: baris penugasan yang disembunyikan dari dasbor pegawai, bukan dihapus.
+const showArchived = Astro.url.searchParams.get("arsip") === "1";
+
 // Group the user's activities by unit, keeping the catalog's unit order. Uses every
 // unit: an activity from the Instruksi dialog still has to show which unit it lives in.
 const assignedActivities = selectedId ? listAssignedActivitiesForUser(selectedId) : [];
+const archivedActivities = selectedId ? listArchivedActivitiesForUser(selectedId) : [];
 const byUnit = allCategories
   .map((category) => ({
     category,
     activities: assignedActivities.filter((activity) => activity.category_id === category.id),
   }))
   .filter((group) => group.activities.length > 0);
+const archivedByUnit = allCategories
+  .map((category) => ({
+    category,
+    activities: archivedActivities.filter((activity) => activity.category_id === category.id),
+  }))
+  .filter((group) => group.activities.length > 0);
 
-const totalActivities = byUnit.reduce((sum, group) => sum + group.activities.length, 0);
+const totalActivities = assignedActivities.length;
+const totalArchived = archivedActivities.length;
+// Tab links keep the selected person; the archive view is a URL, so it survives reload.
+const tabHref = (archived: boolean) =>
+  `/dashboard/assignments?user=${selectedId}${archived ? "&arsip=1" : ""}`;
 // Picker (single + bulk) covers the normal units only — the system unit is written by
 // the Instruksi dialog, never picked here.
 const unitsWithActivities = categories.filter((category) =>
@@ -258,36 +276,132 @@ const noJabatanBadge =
                   {totalActivities > 0
                     ? ` · ${totalActivities} aktivitas di ${byUnit.length} unit kerja`
                     : " · belum ada penugasan"}
+                  {totalArchived > 0 ? ` · ${totalArchived} di arsip` : ""}
                 </p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                {totalActivities > 0 && (
+                {!showArchived && totalActivities > 0 && (
                   <Button variant="ghost" size="sm" type="button" data-clear-open>
                     <Trash class="size-4" />
                     Hapus semua
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  type="button"
-                  data-assign-open
-                  disabled={!canAssign}
-                  title={canAssign ? undefined : "Semua aktivitas sudah ditugaskan ke pengguna ini"}
-                >
-                  <Plus class="size-4" />
-                  Tambah
-                </Button>
+                {!showArchived && (
+                  <Button
+                    size="sm"
+                    type="button"
+                    data-assign-open
+                    disabled={!canAssign}
+                    title={canAssign ? undefined : "Semua aktivitas sudah ditugaskan ke pengguna ini"}
+                  >
+                    <Plus class="size-4" />
+                    Tambah
+                  </Button>
+                )}
               </div>
             </header>
 
-            {!canAssign && unitsWithActivities.length > 0 && (
+            {/* Arsip lewat URL, seperti filter di tracker Instruksi: tahan reload, bisa
+                di-bookmark, dan tetap jalan tanpa JavaScript. */}
+            <nav class="flex gap-1 border-b border-slate-200 px-3 py-1.5" aria-label="Tampilan penugasan">
+              {[
+                { archived: false, label: "Aktif", count: totalActivities },
+                { archived: true, label: "Arsip", count: totalArchived },
+              ].map((tab) => (
+                <a
+                  href={tabHref(tab.archived)}
+                  aria-current={showArchived === tab.archived ? "page" : undefined}
+                  class:list={[
+                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+                    showArchived === tab.archived
+                      ? "bg-brand-50 text-brand-700"
+                      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900",
+                  ]}
+                >
+                  {tab.archived && <ArchiveBox class="size-3.5" />}
+                  {tab.label}
+                  <span class="rounded-full bg-slate-100 px-1.5 text-[11px] text-slate-600 tabular-nums">
+                    {tab.count}
+                  </span>
+                </a>
+              ))}
+            </nav>
+
+            {!showArchived && !canAssign && unitsWithActivities.length > 0 && (
               <p class="border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-xs text-slate-500">
-                Semua jenis aktivitas sudah ditugaskan ke pengguna ini. Lepas salah satu untuk
+                Semua jenis aktivitas sudah ditugaskan ke pengguna ini. Arsipkan salah satu untuk
                 menugaskannya ulang.
               </p>
             )}
 
-            {byUnit.length === 0 ? (
+            {showArchived ? (
+              archivedByUnit.length === 0 ? (
+                <div class="px-5 py-12 text-center">
+                  <ArchiveBox class="mx-auto size-8 text-slate-300" />
+                  <p class="mt-2 text-sm font-medium text-slate-900">Arsip masih kosong</p>
+                  <p class="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+                    Penugasan yang diarsipkan dari tampilan aktif akan muncul di sini, lengkap dengan
+                    riwayatnya.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p class="border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-xs text-slate-500">
+                    Penugasan di arsip tidak muncul di dasbor dan lonceng pengguna, tetapi catatan serta
+                    riwayatnya tetap tersimpan.
+                  </p>
+                  <div class="divide-y divide-slate-200">
+                    {archivedByUnit.map(({ category, activities }) => (
+                      <div class="px-5 py-4" data-reveal="up">
+                        <div class="flex items-center gap-2">
+                          <category.icon class="size-4 text-slate-400" />
+                          <h3 class="text-sm font-semibold text-slate-900">{category.label}</h3>
+                          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                            {activities.length}
+                          </span>
+                        </div>
+                        <ul class="mt-2 divide-y divide-slate-100">
+                          {activities.map((activity) => (
+                            <li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2" data-reveal="fade">
+                              <span class="min-w-0 flex-1 text-sm text-slate-800">{activity.name}</span>
+                              <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                                {activity.periode}
+                              </span>
+                              <span class="shrink-0 text-xs text-slate-400">
+                                Diarsipkan {formatDateOnly(activity.archived_at)}
+                              </span>
+                              <button
+                                type="button"
+                                data-restore-activity
+                                data-user-id={selected.id}
+                                data-activity-id={activity.id}
+                                aria-label={`Pulihkan ${activity.name}`}
+                                class="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+                              >
+                                <ArrowPath class="size-3.5" />
+                                Pulihkan
+                              </button>
+                              <button
+                                type="button"
+                                data-remove-activity
+                                data-user-id={selected.id}
+                                data-activity-id={activity.id}
+                                aria-label={`Hapus permanen ${activity.name}`}
+                                title="Hapus permanen — catatan dan riwayatnya ikut terhapus"
+                                class="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-brand-600"
+                              >
+                                <Trash class="size-3.5" />
+                                <span data-delete-label>Hapus</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            ) : byUnit.length === 0 ? (
               <div class="px-5 py-12 text-center">
                 <ClipboardDocument class="mx-auto size-8 text-slate-300" />
                 {unitsWithActivities.length === 0 ? (
@@ -330,14 +444,14 @@ const noJabatanBadge =
                           </span>
                           <button
                             type="button"
-                            data-remove-activity
+                            data-archive-activity
                             data-user-id={selected.id}
                             data-activity-id={activity.id}
-                            aria-label={`Lepas ${activity.name}`}
+                            aria-label={`Arsipkan ${activity.name}`}
                             class="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600"
                           >
-                            <XMark class="size-3.5" />
-                            Lepas
+                            <ArchiveBox class="size-3.5" />
+                            Arsipkan
                           </button>
                         </li>
                       ))}
@@ -909,9 +1023,62 @@ const noJabatanBadge =
       toast("Semua penugasan pengguna ini dihapus.");
     });
 
-    // Lepas satu aktivitas dari user ini.
-    document.querySelectorAll<HTMLButtonElement>("[data-remove-activity]").forEach((button) => {
+    // Arsipkan satu aktivitas dari user ini. Barisnya tidak dihapus: catatan dan
+    // riwayatnya tetap ada, hanya hilang dari dasbor pegawai.
+    document.querySelectorAll<HTMLButtonElement>("[data-archive-activity]").forEach((button) => {
       button.addEventListener("click", async () => {
+        button.disabled = true;
+        const { error } = await actions.archiveAssignment({
+          userId: Number(button.dataset.userId ?? 0),
+          activityId: Number(button.dataset.activityId ?? 0),
+        });
+        button.disabled = false;
+        if (error) {
+          toast(error.message ?? "Aktivitas gagal diarsipkan.", "error");
+          return;
+        }
+        await refreshPage();
+        toast("Aktivitas dipindahkan ke arsip.");
+      });
+    });
+
+    // Pulihkan dari arsip. Tugasnya kembali muncul di dasbor dengan periode mulai hari ini.
+    document.querySelectorAll<HTMLButtonElement>("[data-restore-activity]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const { error } = await actions.restoreAssignment({
+          userId: Number(button.dataset.userId ?? 0),
+          activityId: Number(button.dataset.activityId ?? 0),
+        });
+        button.disabled = false;
+        if (error) {
+          toast(error.message ?? "Penugasan gagal dipulihkan.", "error");
+          return;
+        }
+        await refreshPage();
+        toast("Penugasan dipulihkan — periodenya mulai dihitung hari ini.");
+      });
+    });
+
+    // Hapus permanen dari arsip — satu-satunya jalur yang membuang catatan. Dua klik,
+    // karena tombolnya tidak bisa dibatalkan.
+    document.querySelectorAll<HTMLButtonElement>("[data-remove-activity]").forEach((button) => {
+      const label = button.querySelector<HTMLElement>("[data-delete-label]");
+      const reset = () => {
+        delete button.dataset.confirm;
+        if (label) label.textContent = "Hapus";
+        button.classList.remove("text-red-600");
+      };
+      button.addEventListener("click", async () => {
+        if (button.dataset.confirm !== "1") {
+          button.dataset.confirm = "1";
+          if (label) label.textContent = "Yakin?";
+          button.classList.add("text-red-600");
+          setTimeout(() => {
+            if (button.dataset.confirm === "1") reset();
+          }, 4000);
+          return;
+        }
         button.disabled = true;
         const { error } = await actions.removeActivity({
           userId: Number(button.dataset.userId ?? 0),
@@ -919,11 +1086,11 @@ const noJabatanBadge =
         });
         button.disabled = false;
         if (error) {
-          toast(error.message ?? "Aktivitas gagal dilepas.", "error");
+          toast(error.message ?? "Aktivitas gagal dihapus.", "error");
           return;
         }
         await refreshPage();
-        toast("Aktivitas dilepas dari penugasan.");
+        toast("Penugasan dihapus permanen beserta catatannya.");
       });
     });
   };

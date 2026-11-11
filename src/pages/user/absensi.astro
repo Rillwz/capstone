@@ -1,0 +1,367 @@
+---
+// Absensi — pegawai absen masuk/pulang dari lokasi kantor. Jarak dihitung server; halaman
+// ini hanya mengirim koordinat mentah yang diberikan browser dan menampilkan hasilnya.
+import { CheckCircle, Clock, InformationCircle, MapPin, ShieldCheck } from "../../lib/icons";
+import Button from "../../components/ui/Button.astro";
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { requireUser } from "../../lib/auth";
+import { getAttendanceLocation, listAttendanceForDay, listOwnAttendance } from "../../lib/db";
+import { formatDistance } from "../../lib/attendance";
+import { formatDate, formatDateTime } from "../../lib/format";
+import { todayIso } from "../../lib/tasks";
+
+const session = await requireUser(Astro);
+if (session instanceof Response) return session;
+
+const userId = Number(session.user!.id);
+if (!Number.isInteger(userId)) return Astro.redirect("/login?error=SessionRequired");
+
+const today = todayIso();
+const rows = listAttendanceForDay(userId, today);
+const masuk = rows.find((row) => row.kind === "masuk") ?? null;
+const pulang = rows.find((row) => row.kind === "pulang") ?? null;
+const office = getAttendanceLocation();
+
+// The most recent fix, so the map has something to show before the employee presses.
+const last = rows.at(-1) ?? null;
+const history = listOwnAttendance(userId, 40).filter((row) => row.tanggal !== today);
+
+const clock = new Intl.DateTimeFormat("id-ID", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Asia/Jakarta",
+}).format(new Date());
+
+// Pratinjau memakai titik yang sama dengan pagar server.
+const mapOffice = office ? JSON.stringify(office) : "";
+---
+
+<DashboardLayout title="Absensi" user={session.user}>
+  <div class="flex flex-wrap items-end justify-between gap-3" data-reveal="up">
+    <div>
+      <h1 class="text-xl font-semibold text-slate-900">Absensi</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        {formatDate(today)} · {clock} WIB — absen hanya sah dari dalam radius lokasi kantor.
+      </p>
+    </div>
+    {
+      masuk && (
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">
+          <CheckCircle class="size-4" />
+          Sudah absen masuk
+        </span>
+      )
+    }
+  </div>
+
+  {
+    !office ? (
+      <section class="mt-6 rounded-xl border border-slate-200 bg-white p-5" data-reveal="up">
+        <div class="flex items-start gap-3">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500">
+            <MapPin class="size-4" />
+          </span>
+          <div>
+            <h2 class="text-sm font-semibold text-slate-900">Lokasi kantor belum diatur</h2>
+            <p class="mt-1 text-sm text-slate-500">
+              Admin belum menentukan titik lokasi absensi. Hubungi admin, lalu muat ulang halaman ini.
+            </p>
+          </div>
+        </div>
+      </section>
+    ) : (
+      <div class="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <section class="overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+          <header class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-4">
+            <Clock class="size-4 text-slate-400" />
+            <h2 class="text-sm font-semibold text-slate-900">Hari ini</h2>
+          </header>
+
+          <div class="divide-y divide-slate-100">
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
+              <span class="w-16 text-sm font-medium text-slate-500">Masuk</span>
+              {
+                masuk ? (
+                  <span class="min-w-0 flex-1 text-sm text-slate-900">
+                    {formatDateTime(masuk.created_at)}
+                    <span class="block text-xs text-slate-500">
+                      {masuk.location_label ?? "Lokasi tidak tercatat"} · {formatDistance(masuk.distance_m)} dari titik
+                      · akurasi ±{formatDistance(masuk.accuracy_m)}
+                    </span>
+                  </span>
+                ) : (
+                  <span class="min-w-0 flex-1 text-sm text-slate-500">Belum absen</span>
+                )
+              }
+              {
+                !masuk && (
+                  <Button type="button" data-attendance-check="masuk">
+                    <MapPin class="size-4" />
+                    Absen masuk
+                  </Button>
+                )
+              }
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
+              <span class="w-16 text-sm font-medium text-slate-500">Pulang</span>
+              {
+                pulang ? (
+                  <span class="min-w-0 flex-1 text-sm text-slate-900">
+                    {formatDateTime(pulang.created_at)}
+                    <span class="block text-xs text-slate-500">
+                      {pulang.location_label ?? "Lokasi tidak tercatat"} · {formatDistance(pulang.distance_m)} dari titik
+                      · akurasi ±{formatDistance(pulang.accuracy_m)}
+                    </span>
+                  </span>
+                ) : (
+                  <span class="min-w-0 flex-1 text-sm text-slate-500">
+                    {masuk ? "Belum absen pulang" : "Absen masuk dulu"}
+                  </span>
+                )
+              }
+              {
+                masuk && !pulang && (
+                  <Button type="button" variant="outline" data-attendance-check="pulang">
+                    <CheckCircle class="size-4" />
+                    Absen pulang
+                  </Button>
+                )
+              }
+            </div>
+          </div>
+
+          <!-- Hasil pengecekan lokal, sebelum dikirim: jarak, lokasi, dan akurasi. -->
+          <div class="border-t border-slate-200 px-5 py-4">
+            <p data-attendance-state class="flex items-start gap-2 text-sm text-slate-500">
+              <InformationCircle class="mt-0.5 size-4 shrink-0 text-slate-400" />
+              <span data-attendance-state-text>
+                Tekan tombol absen; browser akan meminta izin lokasi. Jarak dihitung dari titik kantor.
+              </span>
+            </p>
+          </div>
+        </section>
+
+        <section class="overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+          <header class="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
+            <MapPin class="size-4 text-slate-400" />
+            <h2 class="text-sm font-semibold text-slate-900">Area absensi</h2>
+          </header>
+          <div
+            data-attendance-map
+            class="h-56 w-full bg-slate-100"
+            data-lat={office ? String(office.latitude) : ""}
+            data-lng={office ? String(office.longitude) : ""}
+            data-radius={office ? String(office.radius_m) : "0"}
+            data-last-lat={last ? String(last.latitude) : ""}
+            data-last-lng={last ? String(last.longitude) : ""}
+            data-office={mapOffice}
+          >
+          </div>
+          {
+            office && (
+              <p class="flex items-center gap-2 border-t border-slate-200 px-5 py-3 text-sm">
+                <ShieldCheck class="size-4 shrink-0 text-slate-400" />
+                <span class="min-w-0 flex-1 truncate text-slate-700">{office.label}</span>
+                <span class="text-xs text-slate-500">{office.radius_m} m</span>
+              </p>
+            )
+          }
+        </section>
+      </div>
+    )
+  }
+
+  {
+    history.length > 0 && (
+      <section class="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white" data-reveal="up">
+        <header class="border-b border-slate-200 px-5 py-4">
+          <h2 class="text-sm font-semibold text-slate-900">Riwayat</h2>
+        </header>
+        <ul class="divide-y divide-slate-100">
+          {history.map((row) => (
+            <li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5" data-reveal="fade">
+              <span class="w-24 shrink-0 text-sm text-slate-500">{formatDate(row.tanggal)}</span>
+              <span class:list={["w-16 shrink-0 text-xs font-medium", row.kind === "masuk" ? "text-emerald-700" : "text-slate-600"]}>
+                {row.kind === "masuk" ? "Masuk" : "Pulang"}
+              </span>
+              <span class="min-w-0 flex-1 text-sm text-slate-900">{formatDateTime(row.created_at)}</span>
+              <span class="text-xs text-slate-500">
+                {row.location_label ?? "Lokasi tidak tercatat"} · {formatDistance(row.distance_m)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <p class="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+    <InformationCircle class="size-3.5 shrink-0 text-slate-400" />
+    Lokasi hanya dikirim saat Anda menekan tombol absen. Jarak dihitung ulang di server dari koordinat
+    yang diterima.
+  </p>
+
+  <noscript>
+    <p class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      Absensi membutuhkan JavaScript: lokasi hanya bisa dibaca browser, bukan form biasa.
+    </p>
+  </noscript>
+
+  <p data-attendance-error hidden role="alert" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+</DashboardLayout>
+
+<script>
+  import { actions } from "astro:actions";
+  import { refreshPage, toast } from "../../scripts/dashboard.ts";
+  import { distanceFromOffice, formatDistance, type AttendanceLocation } from "../../lib/attendance.ts";
+  import { mountAttendanceMap, type AttendanceMap } from "../../scripts/attendance-map.ts";
+
+  // The router swaps the DOM but keeps this module: the map has to be torn down on every
+  // navigation (a leaked WebGL context freezes the tab), and the buttons re-wired.
+  let map: AttendanceMap | null = null;
+  let wired = false;
+
+  const errorBox = () => document.querySelector<HTMLElement>("[data-attendance-error]");
+
+  function showError(message: string) {
+    const box = errorBox();
+    if (!box) return;
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function setState(text: string, tone: "idle" | "ok" | "bad" = "idle") {
+    const p = document.querySelector<HTMLElement>("[data-attendance-state]");
+    const span = document.querySelector<HTMLElement>("[data-attendance-state-text]");
+    if (span) span.textContent = text;
+    if (!p) return;
+    p.dataset.tone = tone;
+    p.classList.toggle("text-emerald-700", tone === "ok");
+    p.classList.toggle("text-red-600", tone === "bad");
+    p.classList.toggle("text-slate-500", tone === "idle");
+  }
+
+  /** getCurrentPosition as a promise, so the caller reads like a straight line. */
+  const locate = () =>
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      });
+    });
+
+  const reason = (error: unknown) => {
+    if (!(error instanceof GeolocationPositionError)) return "Lokasi gagal dibaca.";
+    if (error.code === error.PERMISSION_DENIED) return "Izin lokasi ditolak. Aktifkan lewat ikon lokasi di bilah alamat.";
+    if (error.code === error.TIMEOUT) return "Pencarian lokasi kehabisan waktu. Coba di area terbuka.";
+    return "Lokasi tidak tersedia. Pastikan GPS aktif.";
+  };
+
+  async function init() {
+    const first = document.querySelector<HTMLElement>("[data-attendance-map]");
+
+    // The fence the server uses, sent once as data so the preview names the same place.
+    let office: AttendanceLocation | null = null;
+    if (first?.dataset.office) {
+      try {
+        office = JSON.parse(first.dataset.office) as AttendanceLocation;
+      } catch {
+        office = null;
+      }
+    }
+
+    // Wire the button before the map resolves: mounting is async (dynamic import), and a
+    // press in that window must not be swallowed.
+    if (!wired) {
+      wired = true;
+      wire(office);
+    }
+    if (!first || first.dataset.mounted) return;
+    first.dataset.mounted = "1";
+
+    const lat = Number(first.dataset.lat);
+    const lng = Number(first.dataset.lng);
+    const radius = Number(first.dataset.radius) || 0;
+    const lastLat = Number(first.dataset.lastLat);
+    const lastLng = Number(first.dataset.lastLng);
+    if (Number.isFinite(lat) && lat !== 0) {
+      map = await mountAttendanceMap(first, {
+        latitude: lat,
+        longitude: lng,
+        zoom: 16,
+        radius,
+        fix: Number.isFinite(lastLat) && lastLat !== 0 ? { latitude: lastLat, longitude: lastLng } : null,
+      });
+    }
+  }
+
+  function wire(office: AttendanceLocation | null) {
+    document.addEventListener("click", async (event) => {
+      // Without a secure origin the browser never returns a position; say so instead of hanging.
+      if (!window.isSecureContext) {
+        showError("Lokasi hanya bisa dibaca lewat HTTPS atau localhost.");
+        return;
+      }
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-attendance-check]");
+      if (!button || button.disabled) return;
+      const kind = button.dataset.attendanceCheck === "pulang" ? "pulang" : "masuk";
+
+      const box = errorBox();
+      if (box) box.hidden = true;
+      button.disabled = true;
+      setState("Mencari lokasi Anda…", "idle");
+
+      try {
+        const position = await locate();
+        const point = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        const accuracy = position.coords.accuracy;
+
+        // A preview only: the server recomputes this from the same numbers and decides.
+        const near = distanceFromOffice(office, point.latitude, point.longitude);
+        if (near) {
+          const inside = near.distance <= near.location.radius_m;
+          setState(
+            `Terdeteksi ±${formatDistance(accuracy)} · ${formatDistance(near.distance)} dari ${near.location.label} (radius ${near.location.radius_m} m).`,
+            inside ? "ok" : "bad",
+          );
+        } else {
+          setState(`Terdeteksi ±${formatDistance(accuracy)}.`, "idle");
+        }
+        map?.setFix(point.latitude, point.longitude);
+
+        const { error } = await actions.checkAttendance({
+          kind,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          accuracy_m: accuracy,
+        });
+        if (error) {
+          showError(error.message || "Absen gagal dicatat.");
+          setState("Absen tidak tercatat.", "bad");
+          button.disabled = false;
+          return;
+        }
+      } catch (error) {
+        showError(reason(error));
+        setState("Lokasi tidak terbaca.", "bad");
+        button.disabled = false;
+        return;
+      }
+
+      await refreshPage();
+      toast(kind === "masuk" ? "Absen masuk tercatat." : "Absen pulang tercatat.");
+    });
+  }
+
+  document.addEventListener("astro:page-load", init);
+  document.addEventListener("astro:before-swap", () => {
+    map?.destroy();
+    map = null;
+  });
+  init();
+</script>
