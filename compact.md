@@ -220,6 +220,12 @@ ever counts those rows.
 `assignments.created_by` is `ON DELETE SET NULL`, so deleting an account keeps the
 assignment and just drops the attribution.
 
+A task whose `start_date` is in the future has no occurrence at all (`activePeriod` returns
+`null`), so the recipient's dashboard would show nothing until the day arrives. `listUpcomingAssignments`
+feeds a separate "Akan datang" section on `/user` (no checkbox — the period does not exist yet)
+so an instruction the admin just gave never looks lost. It is a plain read, not part of
+`taskStats`; the counter in the bell comes from `seen_at` and is unaffected.
+
 `assignments.archived_at` is the archive marker (`NULL` = active). Archiving is a soft
 delete: the row, its `occurrence_notes` and its `activity_logs` stay, but the assignment
 disappears from the holder's dashboard, the inbox bell, the Instruksi tracker, the missed

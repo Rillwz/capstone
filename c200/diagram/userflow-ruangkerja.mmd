@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph P["Pegawai"]
+    P1["Buka Ruang Kerja"]
+    P2["Lihat tugas hari ini"]
+  end
+  subgraph S["Sistem"]
+    S1["Muat kemunculan periode berjalan"]
+    S2["Materialisasi periode terlewat"]
+    S3["Hitung beban hari ini:<br/>jumlah terbuka dan sisa menit"]
+  end
+  P1 --> S1 --> S2 --> S3 --> P2
+  P2 --> P3["Tekan Selesai"] --> P4["Kartu berubah, ringkasan diperbarui,<br/>peta kontribusi ditambal"]
+  P2 --> P5["Buka dialog Catatan"] --> P6["Simpan catatan dan tautan bukti"]

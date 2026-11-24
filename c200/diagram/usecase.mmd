@@ -1,0 +1,69 @@
+flowchart LR
+  A0(["Admin"])
+  A1(["Atasan Langsung<br/>(Level 1)"])
+  A2(["Pelaksana<br/>(Level 2)"])
+  A3(["Waktu Sistem"])
+
+  subgraph SIS["Sistem Umsura Assignment"]
+    direction TB
+    subgraph ADM["Dikelola Admin"]
+      UC02["UC-02 Mengelola unit kerja<br/>dan jenis aktivitas"]
+      UC03["UC-03 Memberikan penugasan<br/>dari katalog"]
+      UC11["UC-11 Memutuskan lembur"]
+      UC12["UC-12 Mengelola akun<br/>dan jabatan"]
+      UC13["UC-13 Memproses<br/>reset kata sandi"]
+      UC14["UC-14 Mengelola pengumuman"]
+      UC15["UC-15 Mengimpor Matriks<br/>Rencana Kerja"]
+      UC17["UC-17 Menyusun laporan absensi"]
+    end
+    subgraph BRS["Dipakai Admin dan Atasan Langsung"]
+      UC04["UC-04 Memberikan<br/>instruksi langsung"]
+      UC05["UC-05 Memantau progres<br/>penugasan"]
+      UC06["UC-06 Mencabut instruksi"]
+    end
+    subgraph PEG["Dipakai Atasan Langsung dan Pelaksana"]
+      UC07["UC-07 Menandai tugas selesai"]
+      UC08["UC-08 Menulis catatan dan bukti"]
+      UC09["UC-09 Melihat riwayat dan dasbor"]
+      UC10["UC-10 Mengajukan lembur"]
+      UC16["UC-16 Mencatat absensi<br/>masuk dan pulang"]
+    end
+    UC01["UC-01 Autentikasi"]
+  end
+
+  A0 --> UC02
+  A0 --> UC03
+  A0 --> UC04
+  A0 --> UC05
+  A0 --> UC06
+  A0 --> UC11
+  A0 --> UC12
+  A0 --> UC13
+  A0 --> UC14
+  A0 --> UC15
+  A0 --> UC17
+
+  A1 --> UC04
+  A1 --> UC05
+  A1 --> UC06
+  A1 --> UC07
+  A1 --> UC08
+  A1 --> UC09
+  A1 --> UC10
+  A1 --> UC16
+
+  A2 --> UC07
+  A2 --> UC08
+  A2 --> UC09
+  A2 --> UC10
+  A2 --> UC16
+
+  A3 -.->|"batas waktu diam"| UC11
+
+  UC02 -. "<<include>>" .-> UC01
+  UC04 -. "<<include>>" .-> UC01
+  UC07 -. "<<include>>" .-> UC01
+  UC10 -. "<<include>>" .-> UC01
+  UC16 -. "<<include>>" .-> UC01
+  UC08 -. "<<extend>>" .-> UC07
+  UC13 -. "<<extend>>" .-> UC01

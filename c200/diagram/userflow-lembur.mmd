@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph P["Pegawai"]
+    P1["Buka Lembur"]
+    P4["Isi jam mulai, jam selesai, keterangan"]
+    P5["Kirim"]
+    P9["Lihat status menunggu"]
+  end
+  subgraph S["Sistem"]
+    S1["Hitung menit tugas selesai hari ini"]
+    S2{"Mencapai ambang?"}
+    S3["Formulir terkunci, tampilkan sisa menit"]
+    S6{"Valid dan belum ada<br/>pengajuan menunggu hari ini?"}
+    S7["Tolak dengan pesan galat"]
+    S8["Simpan pengajuan menunggu"]
+  end
+  P1 --> S1 --> S2
+  S2 -- "belum" --> S3
+  S2 -- "sudah" --> P4 --> P5 --> S6
+  S6 -- "tidak" --> S7 --> P4
+  S6 -- "ya" --> S8 --> P9

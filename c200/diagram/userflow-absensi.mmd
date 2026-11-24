@@ -1,0 +1,25 @@
+flowchart LR
+  subgraph P["Pegawai"]
+    P1["Buka Absensi"]
+    P2["Tekan Masuk"]
+    P6["Izinkan lokasi"]
+    P9["Lihat jarak dan waktu tercatat"]
+  end
+  subgraph S["Sistem"]
+    S1["Muat status hari ini"]
+    S2{"Asal aman (HTTPS)?"}
+    S3["Beri tahu lokasi tidak akan tersedia"]
+    S4{"Akurasi cukup baik?"}
+    S5["Tolak: akurasi rendah"]
+    S6["Hitung jarak ke titik kantor"]
+    S7{"Dalam radius?"}
+    S8["Tolak: di luar radius"]
+    S10["Simpan baris kejadian"]
+  end
+  P1 --> S1 --> S2
+  S2 -- "tidak" --> S3
+  S2 -- "ya" --> P2 --> P6 --> S4
+  S4 -- "tidak" --> S5
+  S4 -- "ya" --> S6 --> S7
+  S7 -- "tidak" --> S8
+  S7 -- "ya" --> S10 --> P9

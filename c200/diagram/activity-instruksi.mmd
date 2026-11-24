@@ -1,0 +1,30 @@
+flowchart TD
+  subgraph A["Admin / Atasan Langsung"]
+    A1["Membuka menu Instruksi"]
+    A2["Mengisi nama aktivitas, tanggal mulai, tenggat,<br/>durasi, periode, klasifikasi, frekuensi, SDM"]
+    A3["Memilih satu atau beberapa penerima"]
+    A4["Mengirim instruksi"]
+    A7["Melihat instruksi muncul di panel progres"]
+  end
+
+  subgraph S["Sistem"]
+    S1["Memeriksa sesi dan peran pemanggil<br/>(admin atau level 1)"]
+    S2{"Berhak memberi<br/>instruksi?"}
+    S3["Menolak dengan kode 403"]
+    S4["Memvalidasi masukan:<br/>tanggal, tenggat, durasi, periode"]
+    S5{"Masukan valid?"}
+    S6["Menampilkan pesan galat per kolom"]
+    S7["Menyaring penerima: hanya peran selain admin"]
+    S8["Dalam satu transaksi: membuat atau memakai ulang<br/>aktivitas di unit Instruksi, lalu menyimpan penugasan"]
+    S9{"Penerima kosong<br/>setelah penyaringan?"}
+    S10["Menolak dan menampilkan pesan"]
+  end
+
+  A1 --> S1 --> S2
+  S2 -- "tidak" --> S3
+  S2 -- "ya" --> A2 --> A4 --> S4 --> S5
+  S5 -- "tidak" --> S6 --> A2
+  S5 -- "ya" --> S7 --> S9
+  S9 -- "ya" --> S10 --> A3
+  S9 -- "tidak" --> S8 --> A7
+  A3 --> A4

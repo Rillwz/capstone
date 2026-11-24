@@ -1,0 +1,127 @@
+erDiagram
+  USERS ||--o{ ASSIGNMENTS : "menerima"
+  USERS ||--o{ ASSIGNMENTS : "memberi"
+  USERS ||--o{ ACTIVITY_LOGS : "mencatat"
+  USERS ||--o{ OCCURRENCE_NOTES : "menulis"
+  USERS ||--o{ OVERTIME_REQUESTS : "mengajukan"
+  USERS ||--o{ PASSWORD_RESET_REQUESTS : "meminta"
+  USERS ||--o{ LOGIN_LOGS : "masuk"
+  USERS ||--o{ POSTS : "menulis"
+  USERS ||--o{ ATTENDANCE_LOGS : "mencatat kehadiran"
+  POSITIONS ||--o{ USERS : "menjadi label jabatan"
+  CATEGORIES ||--o{ ACTIVITIES : "berisi"
+  ACTIVITIES ||--o{ ASSIGNMENTS : "ditugaskan"
+  ACTIVITIES ||--o{ ACTIVITY_LOGS : "dicatat"
+  ACTIVITIES ||--o{ OCCURRENCE_NOTES : "diberi catatan"
+
+  USERS {
+    int id PK
+    text name
+    text email UK
+    text password_hash
+    int role "0 admin, 1 atasan, 2 pelaksana"
+    text jabatan "salinan label, bukan FK"
+  }
+  POSITIONS {
+    int id PK
+    text label UK
+  }
+  CATEGORIES {
+    text id PK
+    text label
+    text icon
+    int position
+  }
+  ACTIVITIES {
+    int id PK
+    text category_id FK
+    text name
+    text start_date
+    text end_date
+    text periode
+    int frequency
+    int minutes
+    int sdm
+    int volume
+  }
+  ASSIGNMENTS {
+    int id PK
+    int user_id FK
+    int activity_id FK
+    text created_at
+    text seen_at
+    int created_by FK
+    text origin
+    text archived_at
+  }
+  ACTIVITY_LOGS {
+    int id PK
+    int user_id FK
+    int activity_id FK
+    text period_key
+    text status "selesai atau terlewat"
+    text completed_at
+  }
+  OCCURRENCE_NOTES {
+    int user_id PK
+    int activity_id PK
+    text period_key PK
+    text note
+    text link
+  }
+  OVERTIME_REQUESTS {
+    int id PK
+    int user_id FK
+    text tanggal
+    text jam_mulai
+    text jam_selesai
+    text status
+    text catatan_admin
+    text seen_at
+    int handled_by FK
+  }
+  OVERTIME_SETTINGS {
+    int id PK "selalu 1"
+    int min_minutes
+    int expire_minutes
+  }
+  PASSWORD_RESET_REQUESTS {
+    int id PK
+    int user_id FK
+    text status
+    int handled_by FK
+    text handled_at
+  }
+  LOGIN_LOGS {
+    int id PK
+    int user_id FK
+    text ip
+    text user_agent
+    text created_at
+  }
+  POSTS {
+    int id PK
+    text title
+    text body
+    int author_id FK
+    int position
+  }
+  ATTENDANCE_LOCATION {
+    int id PK "selalu 1"
+    text label
+    real latitude
+    real longitude
+    int radius_m
+  }
+  ATTENDANCE_LOGS {
+    int id PK
+    int user_id FK
+    text tanggal
+    text kind "masuk atau pulang"
+    text location_label "salinan, bukan FK"
+    real latitude
+    real longitude
+    real accuracy_m
+    real distance_m
+    text created_at
+  }

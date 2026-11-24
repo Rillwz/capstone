@@ -1,0 +1,26 @@
+flowchart TD
+  subgraph P["Pegawai (Level 1 / Level 2)"]
+    P1["Membuka ruang kerja"]
+    P2["Menekan tombol selesai pada satu kemunculan"]
+    P7["Melihat status kartu berubah dan ringkasan hari ini diperbarui"]
+    P8["Membuka dialog catatan"]
+    P9["Mengisi catatan dan tautan bukti, lalu menyimpan"]
+  end
+
+  subgraph S["Sistem"]
+    S1["Memuat kemunculan periode berjalan<br/>dan menandai periode yang sudah lewat sebagai terlewat"]
+    S2{"Periode kemunculan<br/>masih berjalan?"}
+    S3["Menolak aksi dan menampilkan pesan galat"]
+    S4["Menulis log status selesai, memperbarui statistik,<br/>peta kontribusi, dan progres pemberi tugas"]
+    S5["Menyimpan catatan dan tautan pada<br/>kunci pengguna-aktivitas-periode"]
+    S6{"Tautan valid<br/>(http/https absolut)?"}
+    S7["Menolak simpan dan menampilkan pesan galat"]
+  end
+
+  P1 --> S1 --> P2 --> S2
+  S2 -- "ya" --> S4 --> P7
+  S2 -- "tidak" --> S3
+  P7 --> P8 --> P9 --> S6
+  S6 -- "ya" --> S5
+  S6 -- "tidak" --> S7
+  S5 -. "catatan bertahan walau status dibatalkan" .-> P7

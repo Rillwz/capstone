@@ -1,0 +1,13 @@
+flowchart TB
+  U["Peramban Pengguna<br/>modern, JavaScript aktif"]
+  P["Proksi Balik<br/>Caddy atau nginx, TLS, HTTPS"]
+  N["Proses Node.js 22<br/>dist/server/entry.mjs — satu instans"]
+  V[("Volume Persisten<br/>data/app.db + data/app.db-wal")]
+  BK[("Media Pencadangan<br/>salinan berkas berkala")]
+  ENV["Variabel Lingkungan<br/>AUTH_SECRET, PORT, HOST"]
+
+  U -->|"HTTPS 443"| P
+  P -->|"HTTP 127.0.0.1:4321"| N
+  N -->|"baca tulis SQLite WAL"| V
+  V -.->|"salinan harian"| BK
+  ENV --> N

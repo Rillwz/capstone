@@ -1857,6 +1857,38 @@ export function listUserOccurrences(userId: number): UserOccurrence[] {
     });
 }
 
+export interface UpcomingAssignment {
+  activity_id: number;
+  name: string;
+  category_id: string;
+  periode: Periode;
+  minutes: number;
+  start_date: string;
+  end_date: string;
+  giver_name: string | null;
+  giver_email: string | null;
+}
+
+/**
+ * Penugasan yang tanggal mulainya belum tiba. Tidak punya kemunculan (lihat
+ * `activePeriod`), jadi tanpa daftar ini penerima tidak melihat apa pun sampai
+ * harinya tiba — instruksi yang baru masuk terasa hilang.
+ */
+export function listUpcomingAssignments(userId: number): UpcomingAssignment[] {
+  return db
+    .prepare(
+      `SELECT ac.id AS activity_id, ac.name, ac.category_id, ac.periode, ac.minutes,
+              ac.start_date, ac.end_date,
+              gv.name AS giver_name, gv.email AS giver_email
+       FROM assignments g
+       JOIN activities ac ON ac.id = g.activity_id
+       LEFT JOIN users gv ON gv.id = g.created_by
+       WHERE g.user_id = ? AND g.archived_at IS NULL AND ac.start_date > ?
+       ORDER BY ac.start_date, ac.name COLLATE NOCASE`,
+    )
+    .all(userId, todayIso()) as UpcomingAssignment[];
+}
+
 /** Catatan & tautan satu kemunculan (kosong kalau belum ada). */
 export interface OccurrenceNote {
   note: string;

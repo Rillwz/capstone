@@ -1,0 +1,31 @@
+flowchart TD
+  subgraph C["Pegawai"]
+    C1["Menekan tombol selesai"]
+    C5["Menerima kartu dalam keadaan selesai<br/>dan ringkasan hari ini diperbarui"]
+  end
+
+  subgraph B["Peramban"]
+    B1["tasks.ts: mengirim aksi completeTask<br/>beserta tahun grafik"]
+    B4["patchGraph dan refreshTodaySummary<br/>menulis ulang sel dan ringkasan"]
+  end
+
+  subgraph S["Server Aplikasi"]
+    A1["Aksi completeTask"]
+    A2["currentUserId: membaca sesi<br/>lalu memverifikasi baris pengguna"]
+    A3{"Sesi valid dan<br/>periode masih berjalan?"}
+    A4["Menolak, mengembalikan galat"]
+    A5["completeOccurrence: menulis satu baris<br/>status selesai untuk kunci periode"]
+    A6["materializeOverdue: mencatat periode lewat<br/>sebagai terlewat pada tanggal jatuh tempo"]
+    A7["taskStats dan graph tahunan"]
+  end
+
+  subgraph D["Basis Data"]
+    D1[("activity_logs")]
+    D2[("activities dan assignments")]
+  end
+
+  C1 --> B1 --> A1 --> A2 --> A3
+  A3 -- "tidak" --> A4 --> B1
+  A3 -- "ya" --> A5 --> D1
+  A5 --> A6 --> D2
+  A6 --> A7 --> B4 --> C5

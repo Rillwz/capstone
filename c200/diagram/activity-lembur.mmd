@@ -1,0 +1,39 @@
+flowchart TD
+  subgraph G["Pegawai"]
+    G1["Membuka halaman Lembur"]
+    G2["Melengkapi jam mulai, jam selesai, keterangan"]
+    G3["Mengirim pengajuan"]
+    G6["Melihat status pengajuan berubah"]
+  end
+
+  subgraph S["Sistem"]
+    S1["Menghitung total menit tugas selesai hari ini"]
+    S2{"Mencapai ambang<br/>menit minimum?"}
+    S3["Menonaktifkan formulir dan menampilkan sisa kebutuhan menit"]
+    S4["Memvalidasi jam dan tanggal"]
+    S5{"Tanggal hari ini dan<br/>jam selesai > jam mulai?"}
+    S6["Menolak dan menampilkan pesan"]
+    S7["Menyimpan pengajuan berstatus menunggu"]
+    S8{"Sudah ada pengajuan<br/>menunggu pada tanggal itu?"}
+    S9["Menolak pengajuan ganda"]
+    S10["Menandai pengajuan yang melewati batas waktu diam sebagai ditolak"]
+  end
+
+  subgraph A["Admin"]
+    A1["Membuka antrean lembur"]
+    A2{"Setujui?"}
+    A3["Menyimpan keputusan disetujui beserta catatan"]
+    A4["Menyimpan keputusan ditolak beserta alasan"]
+  end
+
+  G1 --> S1 --> S2
+  S2 -- "belum" --> S3
+  S2 -- "sudah" --> G2 --> G3 --> S4 --> S5
+  S5 -- "tidak" --> S6 --> G2
+  S5 -- "ya" --> S8
+  S8 -- "ya" --> S9 --> G2
+  S8 -- "tidak" --> S7 --> G6
+  S10 --> A1
+  S7 --> A1 --> A2
+  A2 -- "ya" --> A3 --> G6
+  A2 -- "tidak" --> A4 --> G6

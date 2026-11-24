@@ -7,7 +7,7 @@
 //
 // Semua aksi memakai Astro Action (src/actions) — menandai selesai, membatalkan, dan
 // menyimpan catatan berjalan lewat RPC, jadi halaman tidak pernah dimuat ulang.
-import { Check, CheckCircle, Clock, Inbox, ExclamationTriangle } from "../lib/icons";
+import { CalendarDays, Check, CheckCircle, Clock, Inbox, ExclamationTriangle, User } from "../lib/icons";
 import BarChart from "../components/ui/BarChart.astro";
 import ContributionGraph from "../components/user/ContributionGraph.astro";
 import NoteDialog from "../components/user/NoteDialog.astro";
@@ -19,6 +19,7 @@ import {
   dailyDoneTrend,
   listDailyActivity,
   listMissedTasks,
+  listUpcomingAssignments,
   listUserOccurrences,
   markNotificationsSeen,
   materializeOverdue,
@@ -48,6 +49,9 @@ if (Astro.request.method === "POST") {
 materializeOverdue(userId);
 const occurrences = listUserOccurrences(userId);
 const missed = listMissedTasks(userId);
+// Tugas yang tanggal mulainya belum tiba: belum punya kemunculan, jadi ditampilkan
+// terpisah supaya instruksi yang baru masuk tidak terasa hilang.
+const upcoming = listUpcomingAssignments(userId);
 
 // Urutan kerja, bukan urutan abjad: yang terlambat naik, yang selesai turun. Dihitung
 // di server supaya urutannya sama saat halaman dibuka tanpa JavaScript.
@@ -211,12 +215,19 @@ const dueText = (due: string) => {
 
   {/* Panel tugas: isi utama dashboard, ditaruh paling atas. Filternya chip periode —
       satu grup per jenis periode, dengan "Hari ini" sebagai sapuan lintas periode. */}
-  <section class="mt-6" aria-labelledby="tugas-title" data-reveal="up">
+  <section
+    class="mt-6"
+    aria-labelledby="tugas-title"
+    data-reveal="up"
+    hidden={occurrences.length === 0 && upcoming.length > 0}
+  >
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 id="tugas-title" class="scroll-mt-24 text-sm font-semibold text-slate-900">Tugas</h2>
-      <p class="text-xs text-slate-500">
-        {panelDone}/{occurrences.length} selesai
-      </p>
+      {occurrences.length > 0 && (
+        <p class="text-xs text-slate-500">
+          {panelDone}/{occurrences.length} selesai
+        </p>
+      )}
     </div>
 
     {
@@ -297,7 +308,7 @@ const dueText = (due: string) => {
     }
 
     {
-      occurrences.length === 0 && (
+      occurrences.length === 0 && upcoming.length === 0 && (
         <div class="mt-3 flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
           <Inbox class="size-8 text-slate-300" />
           <p class="text-sm font-medium text-slate-900">Belum ada penugasan</p>
@@ -308,6 +319,66 @@ const dueText = (due: string) => {
       )
     }
   </section>
+
+  {/* Akan datang: tugas yang tanggal mulainya belum tiba. Tanpa centang — periodenya
+      belum lahir, dan `activePeriod` menolak mencatatnya. Sengaja tetap tampil, karena
+      instruksi admin tidak boleh terlihat hilang hanya karena dimulai minggu depan. */}
+  {
+    upcoming.length > 0 && (
+      <section class="mt-8" aria-labelledby="akan-datang-title" data-reveal="up">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 id="akan-datang-title" class="text-sm font-semibold text-slate-900">
+            Akan datang
+          </h2>
+          <p class="text-xs text-slate-500">{upcoming.length} tugas</p>
+        </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Belum bisa dikerjakan. Tugasnya masuk ke daftar tugas pada tanggal mulainya.
+        </p>
+
+        <ul class="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+          {upcoming.map((item) => {
+            const category = findCategory(item.category_id);
+            const UnitIcon = category?.icon ?? Inbox;
+            return (
+              <li class="flex items-start gap-3 p-3.5 sm:p-4">
+                <span class="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full border-2 border-slate-200 text-slate-300">
+                  <CalendarDays class="size-4" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm leading-snug font-medium break-words text-slate-900">
+                    {item.name}
+                  </p>
+                  <p class="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+                    <span class="inline-flex items-center gap-1">
+                      <UnitIcon class="size-3.5" />
+                      {category?.label ?? item.category_id}
+                    </span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                      {item.periode}
+                    </span>
+                    <span class="inline-flex items-center gap-1">
+                      <CalendarDays class="size-3.5" />
+                      Mulai {formatDate(item.start_date)}
+                    </span>
+                  </p>
+                  {item.giver_name && (
+                    <p class="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                      <User class="size-3.5 shrink-0 text-slate-400" />
+                      <span class="shrink-0">Dari</span>
+                      <span class="min-w-0 truncate font-medium text-slate-600">
+                        {item.giver_name}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    )
+  }
 
   {/* Terlewat: pekerjaan yang bisa dibereskan sekarang, jadi naik ke atas grafik.
       Satu kartu berisi baris-baris, bukan satu kartu merah per aktivitas — dinding
